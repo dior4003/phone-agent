@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Telefon server paneli</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<main id="login" class="login" hidden>
+  <svg class="login-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="9" y="3" width="14" height="26" rx="4" fill="none" stroke="currentColor" stroke-width="2.2"/><rect x="12" y="14" width="8" height="12" rx="1.5" fill="currentColor"/></svg>
+  <h1>Telefon server paneli</h1>
+  <p class="muted">Davom etish uchun kiring.</p>
+  <form id="loginForm" autocomplete="on">
+    <label for="pw">Parol</label>
+    <input id="pw" name="password" type="password" autocomplete="current-password" required>
+    <div id="codeRow" hidden>
+      <label for="code">2FA kodi (6 raqam)</label>
+      <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7">
+    </div>
+    <button class="primary" id="loginBtn">Kirish</button>
+    <p id="loginErr" class="err" role="alert"></p>
+  </form>
+</main>
+
+<div id="app" hidden>
+  <header class="top">
+    <h1>Telefon server</h1>
+    <div class="top-right">
+      <span id="conn" class="pill off">Telefon ulanmagan</span>
+      <button id="logout" class="ghost">Chiqish</button>
+    </div>
+  </header>
+
+  <div id="offline" class="banner" hidden>
+    Telefon hozir aloqada emas. Telefonda Phone Agent ilovasi yoqilganini, internet borligini va server manzili to'g'riligini tekshiring.
+  </div>
+
+  <div class="layout">
+    <aside class="device" aria-label="Telefon holati">
+      <svg id="phone" viewBox="0 0 220 440" role="img" aria-labelledby="phoneTitle">
+        <title id="phoneTitle">Telefon: batareya, harorat va ishlagan vaqt</title>
+        <defs><clipPath id="screenClip"><rect x="24" y="48" width="172" height="344" rx="16"/></clipPath></defs>
+        <rect class="ph-body" x="8" y="8" width="204" height="424" rx="36"/>
+        <rect class="ph-screen" x="24" y="48" width="172" height="344" rx="16"/>
+        <g clip-path="url(#screenClip)"><rect id="batFill" class="ph-fill" x="24" y="392" width="172" height="0"/></g>
+        <rect class="ph-cam" x="92" y="22" width="36" height="10" rx="5"/>
+        <text id="phBat" class="ph-big" x="110" y="208" text-anchor="middle">–</text>
+        <text id="phBatLabel" class="ph-label" x="110" y="232" text-anchor="middle">batareya</text>
+        <text id="phTemp" class="ph-mid" x="110" y="296" text-anchor="middle">–</text>
+        <text class="ph-label" x="110" y="318" text-anchor="middle">harorat</text>
+        <text id="phUp" class="ph-small" x="110" y="356" text-anchor="middle">–</text>
+        <text class="ph-label" x="110" y="376" text-anchor="middle">ishlagan vaqt</text>
+      </svg>
+      <p id="deviceName" class="muted device-name">&nbsp;</p>
+    </aside>
+
+    <div id="dash" class="dash">
+      <section aria-labelledby="h-metrics">
+        <h2 id="h-metrics">Resurslar</h2>
+        <div class="tiles">
+          <div class="tile">
+            <div class="tile-head"><span>RAM</span><b id="ramVal">–</b></div>
+            <svg id="ramSpark" class="spark" viewBox="0 0 160 40" preserveAspectRatio="none" aria-hidden="true"></svg>
+            <small id="ramPct" class="muted">&nbsp;</small>
+          </div>
+          <div class="tile">
+            <div class="tile-head"><span>Yuklama</span><b id="loadVal">–</b></div>
+            <svg id="loadSpark" class="spark" viewBox="0 0 160 40" preserveAspectRatio="none" aria-hidden="true"></svg>
+            <small class="muted">oxirgi 1 daqiqa o'rtachasi</small>
+          </div>
+          <div class="tile">
+            <div class="tile-head"><span>Harorat</span><b id="tempVal">–</b></div>
+            <svg id="tempSpark" class="spark" viewBox="0 0 160 40" preserveAspectRatio="none" aria-hidden="true"></svg>
+            <small class="muted">batareya sensori</small>
+          </div>
+          <div class="tile">
+            <div class="tile-head"><span>Xotira</span><b id="diskVal">–</b></div>
+            <div class="meter" role="presentation"><i id="diskBar"></i></div>
+            <small id="diskFree" class="muted">&nbsp;</small>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="h-svc">
+        <h2 id="h-svc">Servislar</h2>
+        <ul id="svcs" class="rows"><li class="empty">Telefon ulangach servislar shu yerda chiqadi.</li></ul>
+      </section>
+
+      <section aria-labelledby="h-pm2">
+        <div class="h-row"><h2 id="h-pm2">pm2 ilovalari</h2><button id="pm2refresh" class="ghost">Yangilash</button></div>
+        <ul id="pm2" class="rows"><li class="empty">pm2 ma'lumoti hali yuklanmagan.</li></ul>
+      </section>
+
+      <section aria-labelledby="h-logs">
+        <h2 id="h-logs">Loglar</h2>
+        <div class="row-controls">
+          <label class="sr" for="logSel">Log manbai</label>
+          <select id="logSel"></select>
+          <label class="sr" for="logLines">Qatorlar soni</label>
+          <select id="logLines"><option>50</option><option selected>100</option><option>300</option><option>500</option></select>
+          <button id="logBtn">Logni yuklash</button>
+        </div>
+        <pre id="logOut" tabindex="0">Log manbasini tanlab, "Logni yuklash"ni bosing.</pre>
+      </section>
+
+      <section aria-labelledby="h-audit">
+        <div class="h-row"><h2 id="h-audit">Amallar jurnali</h2><button id="auditRefresh" class="ghost">Yangilash</button></div>
+        <ul id="audit" class="rows compact"></ul>
+      </section>
+
+      <section aria-labelledby="h-danger" class="danger-zone">
+        <h2 id="h-danger">Telefonni boshqarish</h2>
+        <p class="muted">Qayta yoqilganda barcha servislar vaqtincha to'xtaydi. Avtostart sozlangan bo'lsa, ular o'zi ko'tariladi.</p>
+        <button id="reboot" class="danger">Telefonni qayta yoqish</button>
+      </section>
+    </div>
+  </div>
+</div>
+
+<dialog id="confirm" aria-labelledby="confirmText">
+  <form method="dialog">
+    <p id="confirmText"></p>
+    <div class="dlg-actions">
+      <button value="cancel" class="ghost">Bekor qilish</button>
+      <button value="ok" id="confirmOk" class="primary">Tasdiqlash</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script src="/app.js" defer></script>
+</body>
+</html>
