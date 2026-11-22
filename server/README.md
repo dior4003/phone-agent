@@ -73,8 +73,21 @@ Buyruqlar telefonga yuboriladi va javobi kutiladi (`CMD_TIMEOUT_MS` gacha).
 | `POST /api/pm2/:name/:op` | pm2 ilovasini boshqarish |
 | `GET /api/logs/:name?lines=100` | `name`: `nginx`, `laravel` yoki `pm2:<ilova>`. `lines` 10..500 |
 | `POST /api/device/reboot` | Telefonni 3 soniyadan keyin qayta yoqadi |
+| `GET /api/network` | `{ "ok": true, "wifi": true, "bluetooth": false, "mobileData": true }` |
+| `POST /api/network/:op` | `op` = `wifi_on`\|`wifi_off`\|`bt_on`\|`bt_off`\|`data_on`\|`data_off` |
+| `GET /api/brightness` | `{ "ok": true, "value": 128 }` (0-255, `-1` o'qib bo'lmasa) |
+| `POST /api/brightness` | Tana: `{ "value": 0..255 }` |
+| `POST /api/find/ring` | Jim rejimda ham baland ovoz chaladi (2 daqiqadan keyin o'zi to'xtaydi) |
+| `POST /api/find/stop` | Ovozni to'xtatadi |
+| `POST /api/deploy/clone` | Tana: `{ "repo": "https://...", "dir": "papka-nomi" }`. Faqat `https://` manzillar |
+| `POST /api/deploy/:dir/install` | `npm install` papka ichida |
+| `GET /api/deploy/:dir/scripts` | `{ "ok": true, "scripts": { "dev": "...", "start": "..." } }` (package.json dan) |
+| `POST /api/deploy/:dir/run` | Tana: `{ "script": "dev" }`. Faqat `scripts` ro'yxatidagi nom qabul qilinadi; `pm2 start npm --name <dir> -- run <script>` orqali ishga tushadi |
+| `DELETE /api/deploy/:dir` | pm2 jarayonini va papkani butunlay o'chiradi |
 
 Muvaffaqiyatli javob: `200 { "ok": true, "out": "..." }`. Telefon buyruqni bajara olmasa: `200 { "ok": false, "out": "xato matni" }`.
+
+> **Xavfsizlik eslatmasi:** `deploy` erkin shell buyrug'ini qabul qilmaydi — faqat `git clone` (https manzildan), `npm install` va tanlangan loyihaning o'z `package.json` faylidagi **mavjud** skript nomini ishga tushiradi. Shuning uchun foydalanuvchi hech qachon ixtiyoriy buyruq kirita olmaydi.
 
 ```bash
 TOKEN=...
@@ -110,6 +123,11 @@ Server → agent:
 { "type": "cmd", "id": "uuid", "action": "logs", "target": "laravel", "lines": 100 }
 { "type": "cmd", "id": "uuid", "action": "pm2list" }
 { "type": "cmd", "id": "uuid", "action": "device", "op": "reboot" }
+{ "type": "cmd", "id": "uuid", "action": "network", "op": "status" }
+{ "type": "cmd", "id": "uuid", "action": "brightness", "op": "set", "value": 128 }
+{ "type": "cmd", "id": "uuid", "action": "find", "op": "ring" }
+{ "type": "cmd", "id": "uuid", "action": "deploy", "op": "clone", "target": "papka", "repo": "https://..." }
+{ "type": "cmd", "id": "uuid", "action": "deploy", "op": "run", "target": "papka", "script": "dev" }
 ```
 
 ### `/panel` (brauzer uchun)

@@ -132,6 +132,34 @@ pre {
 }
 .danger-zone { border-top: 1px solid var(--line); padding-top: 18px; }
 
+/* Yoqish/o'chirish tugmachasi (Wi-Fi, Bluetooth, mobil internet) */
+.grow-end { margin-left: auto; }
+.switch { position: relative; display: inline-block; width: 42px; height: 24px; flex: none; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider {
+  position: absolute; inset: 0; cursor: pointer; background: var(--line);
+  border-radius: 999px; transition: background .15s;
+}
+.switch .slider::before {
+  content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px;
+  background: var(--card); border-radius: 50%; transition: transform .15s;
+}
+.switch input:checked + .slider { background: var(--ok); }
+.switch input:checked + .slider::before { transform: translateX(18px); }
+.switch input:disabled + .slider { opacity: .5; cursor: not-allowed; }
+
+/* Ekran yorqinligi */
+.bright-row { align-items: center; }
+.bright-row input[type="range"] { flex: 1 1 auto; min-width: 140px; accent-color: var(--accent); min-height: auto; }
+.bright-row b { min-width: 2.5em; text-align: right; }
+
+/* Yangi loyiha yuklash */
+.deploy-form { display: grid; grid-template-columns: 1fr 180px auto; gap: 8px; margin-bottom: 8px; }
+.deploy-form input { width: 100%; }
+@media (max-width: 640px) { .deploy-form { grid-template-columns: 1fr; } }
+#deployStatus.err { color: var(--bad); }
+#deployScripts .meta.grow { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .82rem; }
+
 /* Dialog va xabarlar */
 dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); padding: 20px; max-width: 380px; width: calc(100% - 40px); }
 dialog::backdrop { background: rgba(8, 14, 26, .55); }

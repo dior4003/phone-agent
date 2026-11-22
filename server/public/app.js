@@ -102,7 +102,13 @@ function setAgent(on) {
   $("#offline").hidden = on;
   $("#dash").classList.toggle("dim", !on);
   document.querySelectorAll("#dash button").forEach((b) => { if (b.id !== "auditRefresh") b.disabled = !on || S.busy.has(b.dataset.key); });
-  if (!on) S.stats = null;
+  document.querySelectorAll("#dash input, #dash select").forEach((i) => { i.disabled = !on; });
+  if (!on) {
+    S.stats = null;
+    $("#deployScripts").hidden = true;
+    $("#deployScripts").replaceChildren();
+    deployStatus("");
+  }
 }
 
 function renderStats(s) {
@@ -283,7 +289,7 @@ function connect() {
     if (m.type === "agent") {
       const was = S.agent;
       setAgent(m.online);
-      if (m.online && !was) setTimeout(loadPm2, 800);
+      if (m.online && !was) { setTimeout(loadPm2, 800); setTimeout(loadNetwork, 800); setTimeout(loadBrightness, 800); }
     } else if (m.type === "stats") {
       pushHist({ ram: m.data.ramTotalMb > 0 ? (1 - m.data.ramAvailMb / m.data.ramTotalMb) * 100 : null, load: m.data.load, temp: m.data.tempC });
       if (!S.agent) setAgent(true);
@@ -319,10 +325,155 @@ async function start() {
   const h = await api("/api/history");
   if (h.ok) for (const x of h.data.samples || []) pushHist(x);
   const st = await api("/api/status");
-  if (st.ok && st.data.agent) { setAgent(true); if (st.data.stats) renderStats(st.data.stats); loadPm2(); }
+  if (st.ok && st.data.agent) {
+    setAgent(true);
+    if (st.data.stats) renderStats(st.data.stats);
+    loadPm2();
+    loadNetwork();
+    loadBrightness();
+  }
   connect();
   loadAudit();
 }
+
+// ---------- Tarmoq: Wi-Fi / Bluetooth / mobil internet ----------
+function setSwitch(input, stateEl, on) {
+  input.checked = !!on;
+  stateEl.textContent = on ? "yoqilgan" : "o'chirilgan";
+}
+
+async function loadNetwork() {
+  if (!S.agent) return;
+  const r = await api("/api/network");
+  if (!r.ok) return;
+  setSwitch($("#netWifi"), $("#netWifiState"), r.data.wifi);
+  setSwitch($("#netBt"), $("#netBtState"), r.data.bluetooth);
+  setSwitch($("#netData"), $("#netDataState"), r.data.mobileData);
+}
+
+async function toggleNetwork(input, stateEl, onKey, offKey, warnOnOff) {
+  const turningOn = input.checked;
+  if (!turningOn && warnOnOff) {
+    const ok = await confirmDialog(
+      "Buni o'chirsangiz, agar telefon shu tarmoq orqali internetga ulangan bo'lsa, ulanish uzilib, panel javob bermay qolishi mumkin. Davom etilsinmi?",
+      "Baribir o'chirish"
+    );
+    if (!ok) { input.checked = true; return; }
+  }
+  input.disabled = true;
+  const r = await api(`/api/network/${turningOn ? onKey : offKey}`, { method: "POST" });
+  input.disabled = false;
+  if (r.ok && r.data.ok) { setSwitch(input, stateEl, turningOn); toast(r.data.out || "Bajarildi"); }
+  else { input.checked = !turningOn; toast(r.data.error || r.data.out || "Xato", true); }
+  loadAudit();
+}
+
+$("#netWifi").addEventListener("change", (e) => toggleNetwork(e.currentTarget, $("#netWifiState"), "wifi_on", "wifi_off", true));
+$("#netBt").addEventListener("change", (e) => toggleNetwork(e.currentTarget, $("#netBtState"), "bt_on", "bt_off", false));
+$("#netData").addEventListener("change", (e) => toggleNetwork(e.currentTarget, $("#netDataState"), "data_on", "data_off", true));
+
+// ---------- Telefonni topish ----------
+$("#findRing").addEventListener("click", async () => {
+  const r = await api("/api/find/ring", { method: "POST" });
+  if (r.ok && r.data.ok) toast("Telefon ovoz chalyapti");
+  else toast(r.data.error || r.data.out || "Xato", true);
+});
+$("#findStop").addEventListener("click", async () => {
+  const r = await api("/api/find/stop", { method: "POST" });
+  if (r.ok && r.data.ok) toast("Ovoz to'xtatildi");
+  else toast(r.data.error || r.data.out || "Xato", true);
+});
+
+// ---------- Ekran yorqinligi ----------
+async function loadBrightness() {
+  if (!S.agent) return;
+  const r = await api("/api/brightness");
+  if (r.ok && Number.isInteger(r.data.value) && r.data.value >= 0) {
+    $("#brightRange").value = r.data.value;
+    $("#brightVal").textContent = r.data.value;
+  }
+}
+$("#brightRange").addEventListener("input", (e) => { $("#brightVal").textContent = e.currentTarget.value; });
+$("#brightSet").addEventListener("click", async () => {
+  const value = parseInt($("#brightRange").value, 10);
+  const r = await api("/api/brightness", { method: "POST", body: { value } });
+  if (r.ok && r.data.ok) toast("Yorqinlik o'rnatildi");
+  else toast(r.data.error || r.data.out || "Xato", true);
+});
+
+// ---------- Yangi loyiha yuklash ----------
+function deployStatus(text, bad = false) {
+  const p = $("#deployStatus");
+  p.textContent = text;
+  p.classList.toggle("err", bad);
+}
+
+function renderDeployScripts(dir, scripts) {
+  const list = $("#deployScripts");
+  const names = Object.keys(scripts || {});
+  list.hidden = false;
+  list.replaceChildren();
+  if (!names.length) return list.append(el("li", { class: "empty" }, "package.json ichida \"scripts\" topilmadi."));
+  for (const name of names) {
+    list.append(el("li", {},
+      el("span", { class: "name" }, name),
+      el("span", { class: "meta grow" }, scripts[name]),
+      el("div", { class: "acts" },
+        el("button", { class: "primary", onclick: (ev) => runDeployScript(dir, name, ev.currentTarget) }, "Ishga tushirish"))));
+  }
+  list.append(el("li", {},
+    el("span", { class: "meta grow" }, `Papka: ${dir}`),
+    el("div", { class: "acts" },
+      el("button", { class: "danger", onclick: () => removeDeployProject(dir) }, "Papkani o'chirish"))));
+}
+
+async function removeDeployProject(dir) {
+  const ok = await confirmDialog(`"${dir}" papkasi va unga tegishli pm2 jarayoni butunlay o'chirilsinmi?`, "O'chirish");
+  if (!ok) return;
+  const r = await api(`/api/deploy/${encodeURIComponent(dir)}`, { method: "DELETE" });
+  if (r.ok && r.data.ok) { toast(`"${dir}" o'chirildi`); $("#deployScripts").hidden = true; $("#deployScripts").replaceChildren(); deployStatus(""); }
+  else toast(r.data.error || r.data.out || "Xato", true);
+  setTimeout(loadPm2, 1000);
+  loadAudit();
+}
+
+async function runDeployScript(dir, script, btn) {
+  btn.disabled = true;
+  btn.textContent = "Ishga tushirilmoqda…";
+  const r = await api(`/api/deploy/${encodeURIComponent(dir)}/run`, { method: "POST", body: { script } });
+  btn.disabled = false;
+  btn.textContent = "Ishga tushirish";
+  if (r.ok && r.data.ok) toast(`"${dir}" (${script}) pm2 orqali ishga tushirildi`);
+  else toast(r.data.error || r.data.out || "Xato", true);
+  setTimeout(loadPm2, 1200);
+  loadAudit();
+}
+
+$("#deployGo").addEventListener("click", async () => {
+  const repo = $("#deployRepo").value.trim();
+  const dir = $("#deployDir").value.trim();
+  if (!repo || !dir) return deployStatus("Repo manzili va papka nomini kiriting.", true);
+  const btn = $("#deployGo");
+  btn.disabled = true;
+  $("#deployScripts").hidden = true;
+
+  deployStatus("Yuklab olinmoqda (git clone)…");
+  let r = await api("/api/deploy/clone", { method: "POST", body: { repo, dir } });
+  if (!r.ok || !r.data.ok) { deployStatus(r.data.error || r.data.out || "Yuklab olishda xato", true); btn.disabled = false; return; }
+
+  deployStatus("Bog'liqliklar o'rnatilmoqda (npm install)… bu bir necha daqiqa cho'zilishi mumkin.");
+  r = await api(`/api/deploy/${encodeURIComponent(dir)}/install`, { method: "POST" });
+  if (!r.ok || !r.data.ok) { deployStatus(r.data.error || r.data.out || "npm install xato berdi", true); btn.disabled = false; return; }
+
+  deployStatus("Skriptlar ro'yxati o'qilmoqda…");
+  r = await api(`/api/deploy/${encodeURIComponent(dir)}/scripts`);
+  btn.disabled = false;
+  if (!r.ok || !r.data.ok) { deployStatus(r.data.error || r.data.out || "Skriptlarni o'qib bo'lmadi", true); return; }
+
+  deployStatus(`Tayyor. "${dir}" uchun ishga tushirish skriptini tanlang:`);
+  renderDeployScripts(dir, r.data.scripts);
+  loadAudit();
+});
 
 async function initLogin() {
   const h = await api("/api/health");

@@ -18,6 +18,10 @@ Telefon serverga **o'zi ulanadi** (outbound WebSocket), shuning uchun port ochis
 | pm2 | Node ilovalar ro'yxati va start / stop / restart |
 | Loglar | nginx, Laravel va pm2 loglarining oxirgi 10-500 qatori |
 | Telefon | Qayta yoqish (reboot) |
+| Tarmoq | Wi-Fi, Bluetooth, mobil internet holatini ko'rish va tugma orqali yoqish/o'chirish |
+| Ekran yorqinligi | 0-255 oralig'ida slayder orqali o'rnatish |
+| Telefonni topish | Jim/tebranish rejimida ham baland ovoz chalish (2 daqiqada o'zi to'xtaydi) |
+| Yangi loyiha yuklash | Git repo (https) dan klonlash → `npm install` → `package.json` dagi tayyor skriptdan (masalan `dev`, `start`) birini tanlab pm2 orqali ishga tushirish. Erkin shell buyrug'i yo'q — faqat shu loyihaning o'z skriptlari |
 | Xavfsizlik | Parol + ixtiyoriy 2FA (TOTP), JWT, urinishlarni cheklash, audit jurnali, faqat ro'yxatdagi amallar |
 | Ogohlantirish | Telegram: harorat, RAM, batareya, xotira, servis to'xtashi, telefon aloqasi uzilishi |
 | API | To'liq REST API (qarang: `server/README.md`) |
@@ -82,9 +86,11 @@ Telefon qayta yonganda agent o'zi ko'tariladi (ilova bir marta yoqilgan bo'lsa).
 Agent buyruqlarni Termux ichidagi dasturlarga yuboradi, shuning uchun ular o'rnatilgan bo'lishi kerak:
 
 ```bash
-pkg install nginx php php-fpm mariadb nodejs procps
+pkg install nginx php php-fpm mariadb nodejs procps git
 npm install -g pm2
 ```
+
+`git` — "Yangi loyiha yuklash" bo'limi uchun kerak (repo klonlash).
 
 Servislar `pidof` orqali tekshiriladi. Nomlar: `mariadbd` yoki `mysqld`, `nginx`, `php-fpm`.
 

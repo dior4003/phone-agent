@@ -29,7 +29,7 @@ object Root {
     /** Android holatini o'qish uchun (Termux muhitisiz). */
     fun raw(cmd: String): String = Shell.cmd(cmd).exec().out.joinToString("\n")
 
-    /** Fon rejimida bajarish (natijani kutmaydi). */
+    /** Fon rejimida b ki ajarish (natijani kutmaydi). */
     fun fireAndForget(cmd: String) {
         Shell.cmd("($cmd) >/dev/null 2>&1 &").exec()
     }

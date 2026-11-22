@@ -22,6 +22,10 @@ const TARGET = /^(pm2:)?[a-z0-9_-]{1,40}$/i;
 const OPS = new Set(["start", "stop", "restart"]);
 const HISTORY_MAX = 720; // 5 soniyalik namuna bilan ~1 soat
 
+const REPO_URL = /^https:\/\/[a-z0-9@:%._+-]{1,80}(\/[a-z0-9._+-]{1,80}){1,6}(\.git)?$/i;
+const SCRIPT_NAME = /^[a-z0-9_:.-]{1,40}$/i;
+const NET_OPS = new Set(["wifi_on", "wifi_off", "bt_on", "bt_off", "data_on", "data_off"]);
+
 function parseConfig(env) {
   const need = (key, min) => {
     const v = env[key];
@@ -257,6 +261,92 @@ export function createApp(env) {
     }
     if (p === "/api/device/reboot" && m === "POST") {
       const r = await command(req, { action: "device", op: "reboot" });
+      return json(res, r.status, r.body);
+    }
+
+    // ---------- Tarmoq: Wi-Fi / Bluetooth / mobil internet ----------
+    if (p === "/api/network" && m === "GET") {
+      const r = await command(req, { action: "network", op: "status" });
+      if (!r.body.ok) return json(res, r.status, r.body);
+      let data = {};
+      try { data = JSON.parse(r.body.out); } catch {}
+      return json(res, 200, { ok: true, ...data });
+    }
+    if ((mm = p.match(/^\/api\/network\/([^/]+)$/)) && m === "POST") {
+      const op = decodeURIComponent(mm[1]);
+      if (!NET_OPS.has(op)) return json(res, 400, { error: "Noto'g'ri amal" });
+      const r = await command(req, { action: "network", op });
+      return json(res, r.status, r.body);
+    }
+
+    // ---------- Ekran yorqinligi ----------
+    if (p === "/api/brightness" && m === "GET") {
+      const r = await command(req, { action: "brightness", op: "get" });
+      if (!r.body.ok) return json(res, r.status, r.body);
+      let value = -1;
+      try { value = JSON.parse(r.body.out).value; } catch {}
+      return json(res, 200, { ok: true, value });
+    }
+    if (p === "/api/brightness" && m === "POST") {
+      const body = await readJson(req);
+      const value = parseInt(body.value, 10);
+      if (!Number.isInteger(value) || value < 0 || value > 255) {
+        return json(res, 400, { error: "Qiymat 0 dan 255 gacha bo'lishi kerak" });
+      }
+      const r = await command(req, { action: "brightness", op: "set", value });
+      return json(res, r.status, r.body);
+    }
+
+    // ---------- Telefonni topish (ovoz) ----------
+    if (p === "/api/find/ring" && m === "POST") {
+      const r = await command(req, { action: "find", op: "ring" });
+      return json(res, r.status, r.body);
+    }
+    if (p === "/api/find/stop" && m === "POST") {
+      const r = await command(req, { action: "find", op: "stop" });
+      return json(res, r.status, r.body);
+    }
+
+    // ---------- Yangi loyihani git orqali yuklab, ishga tushirish ----------
+    // Erkin shell buyrug'i yo'q: faqat clone -> install -> package.json dagi
+    // tayyor skriptlar ro'yxatidan tanlab ishga tushirish (masalan "dev", "start").
+    if (p === "/api/deploy/clone" && m === "POST") {
+      const body = await readJson(req);
+      const dir = String(body.dir || "");
+      const repo = String(body.repo || "");
+      if (!NAME.test(dir)) return json(res, 400, { error: "Noto'g'ri papka nomi" });
+      if (!REPO_URL.test(repo)) return json(res, 400, { error: "Noto'g'ri repo manzili (https://... bilan boshlanishi kerak)" });
+      const r = await command(req, { action: "deploy", op: "clone", target: dir, repo });
+      return json(res, r.status, r.body);
+    }
+    if ((mm = p.match(/^\/api\/deploy\/([^/]+)\/install$/)) && m === "POST") {
+      const dir = decodeURIComponent(mm[1]);
+      if (!NAME.test(dir)) return json(res, 400, { error: "Noto'g'ri papka nomi" });
+      const r = await command(req, { action: "deploy", op: "install", target: dir });
+      return json(res, r.status, r.body);
+    }
+    if ((mm = p.match(/^\/api\/deploy\/([^/]+)\/scripts$/)) && m === "GET") {
+      const dir = decodeURIComponent(mm[1]);
+      if (!NAME.test(dir)) return json(res, 400, { error: "Noto'g'ri papka nomi" });
+      const r = await command(req, { action: "deploy", op: "scripts", target: dir });
+      if (!r.body.ok) return json(res, r.status, r.body);
+      let scripts = {};
+      try { scripts = JSON.parse(r.body.out); } catch {}
+      return json(res, 200, { ok: true, scripts });
+    }
+    if ((mm = p.match(/^\/api\/deploy\/([^/]+)\/run$/)) && m === "POST") {
+      const dir = decodeURIComponent(mm[1]);
+      if (!NAME.test(dir)) return json(res, 400, { error: "Noto'g'ri papka nomi" });
+      const body = await readJson(req);
+      const script = String(body.script || "");
+      if (!SCRIPT_NAME.test(script)) return json(res, 400, { error: "Noto'g'ri skript nomi" });
+      const r = await command(req, { action: "deploy", op: "run", target: dir, script });
+      return json(res, r.status, r.body);
+    }
+    if ((mm = p.match(/^\/api\/deploy\/([^/]+)$/)) && m === "DELETE") {
+      const dir = decodeURIComponent(mm[1]);
+      if (!NAME.test(dir)) return json(res, 400, { error: "Noto'g'ri papka nomi" });
+      const r = await command(req, { action: "deploy", op: "remove", target: dir });
       return json(res, r.status, r.body);
     }
 

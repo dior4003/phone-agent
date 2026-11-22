@@ -90,6 +90,59 @@
         <ul id="svcs" class="rows"><li class="empty">Telefon ulangach servislar shu yerda chiqadi.</li></ul>
       </section>
 
+      <section aria-labelledby="h-net">
+        <h2 id="h-net">Tarmoq</h2>
+        <ul class="rows">
+          <li>
+            <span class="name">Wi-Fi</span>
+            <span class="meta" id="netWifiState">–</span>
+            <label class="switch grow-end"><input type="checkbox" id="netWifi"><span class="slider"></span></label>
+          </li>
+          <li>
+            <span class="name">Bluetooth</span>
+            <span class="meta" id="netBtState">–</span>
+            <label class="switch grow-end"><input type="checkbox" id="netBt"><span class="slider"></span></label>
+          </li>
+          <li>
+            <span class="name">Mobil internet</span>
+            <span class="meta" id="netDataState">–</span>
+            <label class="switch grow-end"><input type="checkbox" id="netData"><span class="slider"></span></label>
+          </li>
+        </ul>
+      </section>
+
+      <section aria-labelledby="h-find">
+        <h2 id="h-find">Telefonni topish</h2>
+        <p class="muted">Jim yoki tebranish rejimida bo'lsa ham baland ovoz chaladi (2 daqiqadan keyin o'zi to'xtaydi).</p>
+        <div class="row-controls">
+          <button id="findRing" class="primary">Ovoz chalish</button>
+          <button id="findStop" class="ghost">To'xtatish</button>
+        </div>
+      </section>
+
+      <section aria-labelledby="h-bright">
+        <h2 id="h-bright">Ekran yorqinligi</h2>
+        <div class="row-controls bright-row">
+          <input type="range" id="brightRange" min="0" max="255" step="1" value="128">
+          <b id="brightVal">–</b>
+          <button id="brightSet">O'rnatish</button>
+        </div>
+      </section>
+
+      <section aria-labelledby="h-deploy">
+        <h2 id="h-deploy">Yangi loyiha yuklash</h2>
+        <p class="muted">Git repo manzilidan yuklab, bog'liqliklarni o'rnatib, package.json dagi tayyor skriptlardan birini (masalan "dev" yoki "start") tanlab ishga tushirasiz.</p>
+        <div class="deploy-form">
+          <label class="sr" for="deployRepo">Repo manzili</label>
+          <input id="deployRepo" placeholder="https://github.com/foydalanuvchi/loyiha.git">
+          <label class="sr" for="deployDir">Papka nomi</label>
+          <input id="deployDir" placeholder="papka-nomi">
+          <button id="deployGo" class="primary">Yuklab olish</button>
+        </div>
+        <p id="deployStatus" class="muted">&nbsp;</p>
+        <ul id="deployScripts" class="rows" hidden></ul>
+      </section>
+
       <section aria-labelledby="h-pm2">
         <div class="h-row"><h2 id="h-pm2">pm2 ilovalari</h2><button id="pm2refresh" class="ghost">Yangilash</button></div>
         <ul id="pm2" class="rows"><li class="empty">pm2 ma'lumoti hali yuklanmagan.</li></ul>
