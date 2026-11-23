@@ -42,6 +42,7 @@ function parseConfig(env) {
     trustProxy: String(env.TRUST_PROXY || "").toLowerCase() === "true",
     sessionSec: Math.max(1, Number(env.SESSION_HOURS || 12)) * 3600,
     cmdTimeout: Number(env.CMD_TIMEOUT_MS || 30000),
+    deployTimeout: Number(env.DEPLOY_TIMEOUT_MS || 15 * 60 * 1000),
     auditFile: env.AUDIT_FILE || path.join(process.cwd(), "audit.log"),
     loginMax: Number(env.LOGIN_MAX_ATTEMPTS || 5),
     thresholds: {
@@ -105,7 +106,7 @@ export function createApp(env) {
   }
 
   // ---------- Telefonga buyruq yuborish ----------
-  function runOnAgent(msg) {
+  function runOnAgent(msg, timeoutMs = cfg.cmdTimeout) {
     return new Promise((resolve) => {
       if (!agent || agent.readyState !== 1) {
         return resolve({ status: 503, body: { ok: false, error: "Telefon ulanmagan" } });
@@ -114,18 +115,40 @@ export function createApp(env) {
       const timer = setTimeout(() => {
         pending.delete(id);
         resolve({ status: 504, body: { ok: false, error: "Telefon javob bermadi (vaqt tugadi)" } });
-      }, cfg.cmdTimeout);
+      }, timeoutMs);
       pending.set(id, { resolve, timer });
       agent.send(JSON.stringify({ type: "cmd", id, ...msg }));
     });
   }
 
-  async function command(req, msg) {
+  // Repo manzilidagi login:token jurnalga tushmasin
+  const redact = (m) => (typeof m.repo === "string" ? { ...m, repo: m.repo.replace(/\/\/[^/@]*@/, "//***@") } : m);
+
+  async function command(req, msg, timeoutMs) {
     const ip = clientIp(req);
-    audit({ ev: "cmd", ip, ...msg });
-    const r = await runOnAgent(msg);
+    audit({ ev: "cmd", ip, ...redact(msg) });
+    const r = await runOnAgent(msg, timeoutMs);
     audit({ ev: "result", action: msg.action, target: msg.target, op: msg.op, status: r.status, ok: !!r.body.ok });
     return r;
+  }
+
+  // ---------- Uzoq ishlar (git clone, npm install) ----------
+  // HTTP so'rovi 30-100 soniyadan keyin uziladi (Cloudflare ham), shuning uchun
+  // bunday amallar fonda bajariladi va panel natijani /api/jobs/:id orqali so'raydi.
+  const jobs = new Map();
+  function startJob(req, msg) {
+    const key = `${msg.action}:${msg.op}:${msg.target}`;
+    for (const j of jobs.values()) if (j.key === key && j.status === "running") return j; // ikki marta boshlanmasin
+    const now = Date.now();
+    for (const [id, j] of jobs) if (now - j.startedAt > 3600_000 || jobs.size > 50) jobs.delete(id);
+    const job = { id: crypto.randomUUID(), key, status: "running", ok: false, out: "", startedAt: now };
+    jobs.set(job.id, job);
+    command(req, msg, cfg.deployTimeout).then((r) => {
+      job.ok = !!r.body.ok;
+      job.out = String(r.body.out ?? r.body.error ?? "");
+      job.status = "done";
+    });
+    return job;
   }
 
   // ---------- HTTP yordamchilari ----------
@@ -316,14 +339,19 @@ export function createApp(env) {
       const repo = String(body.repo || "");
       if (!NAME.test(dir)) return json(res, 400, { error: "Noto'g'ri papka nomi" });
       if (!REPO_URL.test(repo)) return json(res, 400, { error: "Noto'g'ri repo manzili (https://... bilan boshlanishi kerak)" });
-      const r = await command(req, { action: "deploy", op: "clone", target: dir, repo });
-      return json(res, r.status, r.body);
+      if (!agent) return json(res, 503, { ok: false, error: "Telefon ulanmagan" });
+      return json(res, 202, { jobId: startJob(req, { action: "deploy", op: "clone", target: dir, repo }).id });
+    }
+    if ((mm = p.match(/^\/api\/jobs\/([^/]+)$/)) && m === "GET") {
+      const j = jobs.get(decodeURIComponent(mm[1]));
+      if (!j) return json(res, 404, { error: "Ish topilmadi (vaqti o'tgan bo'lishi mumkin)" });
+      return json(res, 200, { id: j.id, status: j.status, ok: j.ok, out: j.out });
     }
     if ((mm = p.match(/^\/api\/deploy\/([^/]+)\/install$/)) && m === "POST") {
       const dir = decodeURIComponent(mm[1]);
       if (!NAME.test(dir)) return json(res, 400, { error: "Noto'g'ri papka nomi" });
-      const r = await command(req, { action: "deploy", op: "install", target: dir });
-      return json(res, r.status, r.body);
+      if (!agent) return json(res, 503, { ok: false, error: "Telefon ulanmagan" });
+      return json(res, 202, { jobId: startJob(req, { action: "deploy", op: "install", target: dir }).id });
     }
     if ((mm = p.match(/^\/api\/deploy\/([^/]+)\/scripts$/)) && m === "GET") {
       const dir = decodeURIComponent(mm[1]);

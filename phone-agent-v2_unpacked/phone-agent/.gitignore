@@ -1,7 +1,0 @@
-node_modules/
-.env
-audit.log
-android/.gradle/
-android/build/
-android/app/build/
-local.properties

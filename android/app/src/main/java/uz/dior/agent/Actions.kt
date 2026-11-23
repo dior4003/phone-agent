@@ -182,12 +182,23 @@ class Actions(private val ctx: Context) {
             "clone" -> {
                 val repo = m.optString("repo")
                 if (!REPO_URL.matches(repo)) return false to "Noto'g'ri repo manzili (https://... bilan boshlanishi kerak)"
-                val (ok, out) = Root.run(user, "test -e $target && echo EXISTS || git clone --depth 1 -- '$repo' $target")
-                if (out.trim() == "EXISTS") return false to "Bu nomda papka allaqachon bor"
-                if (!ok) return false to out.take(2000)
+                val cmd = "command -v git >/dev/null 2>&1 || { echo NOGIT; exit 127; }; " +
+                    "if [ -e $target ]; then echo EXISTS; exit 3; fi; " +
+                    "GIT_TERMINAL_PROMPT=0 git clone --depth 1 -- '$repo' $target 2>&1"
+                val (ok, out) = Root.runLong(user, cmd, 600)
+                if (out.trim() == "NOGIT") return false to "Termux'da git o'rnatilmagan. Termux'da bajaring: pkg install git"
+                if (out.trim() == "EXISTS") return false to "\"$target\" papkasi allaqachon bor. Boshqa nom bering yoki avval uni o'chiring"
+                if (!ok) return false to out.takeLast(2000)
                 true to "Yuklab olindi: $target"
             }
-            "install" -> Root.run(user, "test -d $target || exit 9; cd $target && npm install --no-audit --no-fund")
+            "install" -> {
+                val (ok, out) = Root.runLong(
+                    user,
+                    "test -d $target || { echo 'Papka topilmadi'; exit 9; }; cd $target && npm install --no-audit --no-fund 2>&1",
+                    900
+                )
+                if (!ok) false to out.takeLast(2000) else true to "O'rnatildi: $target"
+            }
             "scripts" -> {
                 val (ok, out) = Root.run(user, "cat $target/package.json 2>/dev/null")
                 if (!ok || out.isBlank()) return false to "package.json topilmadi (avval \"npm install\" bosilganmi?)"

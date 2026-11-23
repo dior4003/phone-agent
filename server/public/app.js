@@ -402,6 +402,34 @@ $("#brightSet").addEventListener("click", async () => {
 });
 
 // ---------- Yangi loyiha yuklash ----------
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Uzoq davom etadigan amal (git clone, npm install): server ishni fonda bajaradi, biz natijani so'raymiz.
+async function runJob(path, body, onTick) {
+  const r = await api(path, { method: "POST", body });
+  if (!r.ok) return r; // tekshiruv xatosi yoki 401/503
+  const id = r.data.jobId;
+  const t0 = Date.now();
+  for (;;) {
+    await sleep(2000);
+    const j = await api("/api/jobs/" + encodeURIComponent(id));
+    if (!j.ok) return j;
+    if (j.data.status === "done") return { ok: true, status: 200, data: { ok: j.data.ok, out: j.data.out } };
+    if (onTick) onTick(Math.round((Date.now() - t0) / 1000));
+  }
+}
+
+// Git xatosini tushunarli maslahatga aylantiradi
+function gitHint(out) {
+  const t = String(out || "");
+  if (/NOGIT|git: .*(not found|inaccessible)|git: command not found/i.test(t)) return "Termux'da git o'rnatilmagan. Termux'da bajaring: pkg install git";
+  if (/could not read Username|Authentication failed|terminal prompts disabled|Repository not found|returned error: 40[134]/i.test(t))
+    return "Repo private yoki manzil noto'g'ri. Private repo uchun manzilga token qo'shing: https://FOYDALANUVCHI:TOKEN@github.com/FOYDALANUVCHI/REPO.git";
+  if (/Could not resolve host|unable to access|Failed to connect|Network is unreachable|SSL|certificate/i.test(t))
+    return "Git internetga chiqa olmayapti. Termux'ning o'zida `git ls-remote <manzil>` ishlaydimi, tekshiring. Termux'da ishlab, bu yerda ishlamasa, root orqali o'tganda tarmoq ruxsati yo'q.";
+  return "";
+}
+
 function deployStatus(text, bad = false) {
   const p = $("#deployStatus");
   p.textContent = text;
@@ -458,11 +486,15 @@ $("#deployGo").addEventListener("click", async () => {
   $("#deployScripts").hidden = true;
 
   deployStatus("Yuklab olinmoqda (git clone)…");
-  let r = await api("/api/deploy/clone", { method: "POST", body: { repo, dir } });
-  if (!r.ok || !r.data.ok) { deployStatus(r.data.error || r.data.out || "Yuklab olishda xato", true); btn.disabled = false; return; }
+  let r = await runJob("/api/deploy/clone", { repo, dir }, (sec) => deployStatus(`Yuklab olinmoqda (git clone)… ${sec} s`));
+  if (!r.ok || !r.data.ok) {
+    const raw = r.data.error || r.data.out || "Yuklab olishda xato";
+    deployStatus([gitHint(raw), raw].filter(Boolean).join("\n\n"), true);
+    btn.disabled = false; return;
+  }
 
-  deployStatus("Bog'liqliklar o'rnatilmoqda (npm install)… bu bir necha daqiqa cho'zilishi mumkin.");
-  r = await api(`/api/deploy/${encodeURIComponent(dir)}/install`, { method: "POST" });
+  deployStatus("Bog'liqliklar o'rnatilmoqda (npm install)…");
+  r = await runJob(`/api/deploy/${encodeURIComponent(dir)}/install`, undefined, (sec) => deployStatus(`Bog'liqliklar o'rnatilmoqda (npm install)… ${sec} s. Bu bir necha daqiqa cho'zilishi mumkin.`));
   if (!r.ok || !r.data.ok) { deployStatus(r.data.error || r.data.out || "npm install xato berdi", true); btn.disabled = false; return; }
 
   deployStatus("Skriptlar ro'yxati o'qilmoqda…");

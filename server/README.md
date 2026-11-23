@@ -8,7 +8,7 @@ Node.js server: veb panel, REST API va telefon agenti uchun WebSocket. Faqat bit
 npm install
 npm run setup        # .env yaratadi (tasodifiy token, kalit, parol). 2FA bilan: npm run setup -- --totp
 npm start
-npm test             # 28 ta avtomatik test
+npm test             # 35 ta avtomatik test
 ```
 
 ## Sozlamalar (`.env`)
@@ -22,7 +22,8 @@ npm test             # 28 ta avtomatik test
 | `HOST` | `127.0.0.1` | LAN/VPS uchun `0.0.0.0` |
 | `TRUST_PROXY` | `false` | Cloudflare/nginx orqasida `true` (haqiqiy IP uchun `CF-Connecting-IP` / `X-Forwarded-For`) |
 | `SESSION_HOURS` | `12` | Token amal qilish muddati |
-| `CMD_TIMEOUT_MS` | `30000` | Telefon javobini kutish vaqti |
+| `CMD_TIMEOUT_MS` | `30000` | Oddiy buyruqlarda telefon javobini kutish vaqti |
+| `DEPLOY_TIMEOUT_MS` | `900000` | `git clone` va `npm install` uchun kutish vaqti (15 daqiqa) |
 | `TOTP_SECRET` | bo'sh | Bo'lsa, 2FA majburiy bo'ladi (`npm run totp`) |
 | `LOGIN_MAX_ATTEMPTS` | `5` | 15 daqiqada xato urinishlar soni |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | bo'sh | Ogohlantirishlar uchun |
@@ -79,14 +80,19 @@ Buyruqlar telefonga yuboriladi va javobi kutiladi (`CMD_TIMEOUT_MS` gacha).
 | `POST /api/brightness` | Tana: `{ "value": 0..255 }` |
 | `POST /api/find/ring` | Jim rejimda ham baland ovoz chaladi (2 daqiqadan keyin o'zi to'xtaydi) |
 | `POST /api/find/stop` | Ovozni to'xtatadi |
-| `POST /api/deploy/clone` | Tana: `{ "repo": "https://...", "dir": "papka-nomi" }`. Faqat `https://` manzillar |
-| `POST /api/deploy/:dir/install` | `npm install` papka ichida |
+| `POST /api/deploy/clone` | Tana: `{ "repo": "https://...", "dir": "papka-nomi" }`. Faqat `https://` manzillar. **Fon ishi**: `202 { "jobId": "..." }` qaytaradi |
+| `POST /api/deploy/:dir/install` | `npm install` papka ichida. **Fon ishi**: `202 { "jobId": "..." }` |
+| `GET /api/jobs/:id` | Fon ishi holati: `{ "status": "running" \| "done", "ok": true, "out": "..." }`. Ishlar 1 soatdan keyin o'chiriladi |
 | `GET /api/deploy/:dir/scripts` | `{ "ok": true, "scripts": { "dev": "...", "start": "..." } }` (package.json dan) |
 | `POST /api/deploy/:dir/run` | Tana: `{ "script": "dev" }`. Faqat `scripts` ro'yxatidagi nom qabul qilinadi; `pm2 start npm --name <dir> -- run <script>` orqali ishga tushadi |
 | `DELETE /api/deploy/:dir` | pm2 jarayonini va papkani butunlay o'chiradi |
 
 Muvaffaqiyatli javob: `200 { "ok": true, "out": "..." }`. Telefon buyruqni bajara olmasa: `200 { "ok": false, "out": "xato matni" }`.
 
+> **Uzoq ishlar:** `git clone` va `npm install` daqiqalab davom etishi mumkin, HTTP so'rovi esa 30-100 soniyadan keyin uziladi (Cloudflare ham). Shuning uchun ular fonda bajariladi, panel natijani har 2 soniyada `/api/jobs/:id` dan so'raydi. Bir xil ish ikki marta bosilsa, ishlayotgani qaytariladi.
+>
+> **Private repo:** manzilga token qo'shing: `https://FOYDALANUVCHI:TOKEN@github.com/FOYDALANUVCHI/REPO.git`. Token audit jurnaliga yozilmaydi (`//***@` bilan almashtiriladi), lekin klon qilingan papkadagi `.git/config` da qoladi. Faqat `repo` ruxsatli, qisqa muddatli token ishlating.
+>
 > **Xavfsizlik eslatmasi:** `deploy` erkin shell buyrug'ini qabul qilmaydi — faqat `git clone` (https manzildan), `npm install` va tanlangan loyihaning o'z `package.json` faylidagi **mavjud** skript nomini ishga tushiradi. Shuning uchun foydalanuvchi hech qachon ixtiyoriy buyruq kirita olmaydi.
 
 ```bash

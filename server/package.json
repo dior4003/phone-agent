@@ -9,7 +9,7 @@
     "start": "node index.js",
     "setup": "node scripts/setup.js",
     "totp": "node scripts/setup.js --totp-only",
-    "test": "node --test test/auth.test.js test/server.test.js"
+    "test": "node --test test/auth.test.js test/server.test.js test/deploy.test.js"
   },
   "dependencies": {
     "ws": "^8.18.0"

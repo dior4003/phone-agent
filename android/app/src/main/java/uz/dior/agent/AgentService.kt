@@ -26,6 +26,8 @@ class AgentService : Service() {
 
     private val client = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build()
     private val worker = Executors.newSingleThreadScheduledExecutor()
+    // Buyruqlar statistika oqimidan alohida bajariladi (uzoq buyruq panelni qotirib qo'ymasin)
+    private val cmdPool = Executors.newCachedThreadPool()
     @Volatile private var ws: WebSocket? = null
     private var statsTask: ScheduledFuture<*>? = null
     @Volatile private var stopped = false
@@ -84,7 +86,7 @@ class AgentService : Service() {
             }
 
             override fun onMessage(w: WebSocket, text: String) {
-                worker.execute { respond(w, text) }
+                cmdPool.execute { respond(w, text) }
             }
 
             override fun onClosed(w: WebSocket, code: Int, reason: String) {
@@ -129,6 +131,7 @@ class AgentService : Service() {
         statsTask?.cancel(true)
         ws?.close(1000, "stop")
         worker.shutdownNow()
+        cmdPool.shutdownNow()
         super.onDestroy()
     }
 
