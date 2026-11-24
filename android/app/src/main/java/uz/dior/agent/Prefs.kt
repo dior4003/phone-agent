@@ -26,4 +26,14 @@ class Prefs(ctx: Context) {
     var enabled: Boolean
         get() = sp.getBoolean("enabled", false)
         set(v) = sp.edit().putBoolean("enabled", v).apply()
+
+    /** Telegram bot tokeni (ogohlantirishlar uchun). Serverdagi .env o'rniga shu yerdan ham sozlash mumkin. */
+    var telegramBotToken: String
+        get() = sp.getString("tgToken", "") ?: ""
+        set(v) = sp.edit().putString("tgToken", v).apply()
+
+    /** Telegram chat ID (shaxsiy yoki guruh). */
+    var telegramChatId: String
+        get() = sp.getString("tgChatId", "") ?: ""
+        set(v) = sp.edit().putString("tgChatId", v).apply()
 }

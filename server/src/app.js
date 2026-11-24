@@ -22,9 +22,21 @@ const TARGET = /^(pm2:)?[a-z0-9_-]{1,40}$/i;
 const OPS = new Set(["start", "stop", "restart"]);
 const HISTORY_MAX = 720; // 5 soniyalik namuna bilan ~1 soat
 
-const REPO_URL = /^https:\/\/[a-z0-9@:%._+-]{1,80}(\/[a-z0-9._+-]{1,80}){1,6}(\.git)?$/i;
+// Birinchi segment (host + ixtiyoriy https://token@host autentifikatsiya) uzunroq
+// chegaraga ega — GitHub'ning "fine-grained" shaxsiy tokenlari 90+ belgi bo'lishi mumkin.
+const REPO_URL = /^https:\/\/[a-z0-9@:%._+-]{1,220}(\/[a-z0-9._+-]{1,80}){1,6}(\.git)?$/i;
 const SCRIPT_NAME = /^[a-z0-9_:.-]{1,40}$/i;
 const NET_OPS = new Set(["wifi_on", "wifi_off", "bt_on", "bt_off", "data_on", "data_off"]);
+const MAX_FILE_BYTES = 15 * 1024 * 1024; // 15 MB (android/.../Actions.kt dagi limit bilan bir xil bo'lishi kerak
+
+// Fayl menejeri uchun yo'l tekshiruvi: "/" bilan boshlanmasin, ".."siz, NUL belgisisiz.
+function validPath(raw) {
+  let p = String(raw ?? "").replace(/\\/g, "/").trim();
+  if (p === "") return ".";
+  if (p.startsWith("/") || p.length > 400 || p.includes("\0")) return null;
+  for (const s of p.split("/")) if (s === "" || s === "." || s === "..") return null;
+  return p;
+}
 
 function parseConfig(env) {
   const need = (key, min) => {
@@ -121,8 +133,13 @@ export function createApp(env) {
     });
   }
 
-  // Repo manzilidagi login:token jurnalga tushmasin
-  const redact = (m) => (typeof m.repo === "string" ? { ...m, repo: m.repo.replace(/\/\/[^/@]*@/, "//***@") } : m);
+  // Repo manzilidagi login:token va fayl ma'lumotini (base64) jurnalga to'liq yozib qo'ymaymiz
+  const redact = (m) => {
+    const out = { ...m };
+    if (typeof out.repo === "string") out.repo = out.repo.replace(/\/\/[^/@]*@/, "//***@");
+    if (typeof out.data === "string" && out.data.length > 80) out.data = `<${out.data.length} belgi, yashirilgan>`;
+    return out;
+  };
 
   async function command(req, msg, timeoutMs) {
     const ip = clientIp(req);
@@ -170,6 +187,26 @@ export function createApp(env) {
       req.on("data", (c) => {
         size += c.length;
         if (size > 4096) { reject(Object.assign(new Error("Juda katta so'rov"), { status: 413 })); req.destroy(); }
+        else chunks.push(c);
+      });
+      req.on("end", () => {
+        if (!chunks.length) return resolve({});
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8"))); }
+        catch { reject(Object.assign(new Error("JSON noto'g'ri"), { status: 400 })); }
+      });
+      req.on("error", reject);
+    });
+  }
+
+  // readJson 4 KB bilan cheklangan (oddiy buyruqlar uchun yetarli); fayl yuklash
+  // (base64) buncha katta bo'lishi mumkin, shuning uchun alohida, kattaroq chegara.
+  function readJsonBig(req, maxBytes) {
+    return new Promise((resolve, reject) => {
+      let size = 0;
+      const chunks = [];
+      req.on("data", (c) => {
+        size += c.length;
+        if (size > maxBytes) { reject(Object.assign(new Error("Fayl juda katta"), { status: 413 })); req.destroy(); }
         else chunks.push(c);
       });
       req.on("end", () => {
@@ -320,6 +357,12 @@ export function createApp(env) {
       return json(res, r.status, r.body);
     }
 
+    // ---------- Chaqmoq ----------
+    if ((mm = p.match(/^\/api\/flashlight\/(on|off)$/)) && m === "POST") {
+      const r = await command(req, { action: "flashlight", op: mm[1] });
+      return json(res, r.status, r.body);
+    }
+
     // ---------- Telefonni topish (ovoz) ----------
     if (p === "/api/find/ring" && m === "POST") {
       const r = await command(req, { action: "find", op: "ring" });
@@ -378,6 +421,58 @@ export function createApp(env) {
       return json(res, r.status, r.body);
     }
 
+    // ---------- Fayl menejeri (Termux foydalanuvchisi papkalari bilan cheklangan) ----------
+    if (p === "/api/files" && m === "GET") {
+      const path = validPath(url.searchParams.get("path"));
+      if (path == null) return json(res, 400, { error: "Noto'g'ri yo'l" });
+      const r = await command(req, { action: "file", op: "list", target: path });
+      if (!r.body.ok) return json(res, r.status, r.body);
+      let entries = [];
+      try { entries = JSON.parse(r.body.out); } catch {}
+      return json(res, 200, { ok: true, path, entries });
+    }
+    if (p === "/api/files/mkdir" && m === "POST") {
+      const body = await readJson(req);
+      const path = validPath(body.path);
+      if (path == null || path === ".") return json(res, 400, { error: "Noto'g'ri papka nomi" });
+      const r = await command(req, { action: "file", op: "mkdir", target: path });
+      return json(res, r.status, r.body);
+    }
+    if (p === "/api/files" && m === "DELETE") {
+      const path = validPath(url.searchParams.get("path"));
+      if (path == null || path === ".") return json(res, 400, { error: "Noto'g'ri yo'l" });
+      const r = await command(req, { action: "file", op: "delete", target: path });
+      return json(res, r.status, r.body);
+    }
+    // O'qish/yozish/zip-yoyish uzoq cho'zilishi mumkin (katta fayl, sekin tarmoq) —
+    // shuning uchun fon ishi (jobs) orqali, boshqa deploy amallari kabi.
+    if (p === "/api/files/read" && m === "POST") {
+      const body = await readJson(req);
+      const path = validPath(body.path);
+      if (path == null || path === ".") return json(res, 400, { error: "Noto'g'ri yo'l" });
+      if (!agent) return json(res, 503, { ok: false, error: "Telefon ulanmagan" });
+      return json(res, 202, { jobId: startJob(req, { action: "file", op: "read", target: path }).id });
+    }
+    if (p === "/api/files/write" && m === "POST") {
+      let body;
+      try { body = await readJsonBig(req, Math.ceil(MAX_FILE_BYTES * 1.4)); }
+      catch (e) { return json(res, e.status || 400, { error: e.message }); }
+      const path = validPath(body.path);
+      const data = String(body.data || "");
+      if (path == null || path === ".") return json(res, 400, { error: "Noto'g'ri yo'l" });
+      if (!data) return json(res, 400, { error: "Fayl ma'lumoti bo'sh" });
+      if (!agent) return json(res, 503, { ok: false, error: "Telefon ulanmagan" });
+      return json(res, 202, { jobId: startJob(req, { action: "file", op: "write", target: path, data }).id });
+    }
+    if (p === "/api/files/unzip" && m === "POST") {
+      const body = await readJson(req);
+      const path = validPath(body.path);
+      const dest = validPath(body.dest);
+      if (path == null || path === "." || dest == null) return json(res, 400, { error: "Noto'g'ri yo'l" });
+      if (!agent) return json(res, 503, { ok: false, error: "Telefon ulanmagan" });
+      return json(res, 202, { jobId: startJob(req, { action: "file", op: "unzip", target: path, dest }).id });
+    }
+
     return json(res, 404, { error: "Topilmadi" });
   }
 
@@ -393,7 +488,8 @@ export function createApp(env) {
   });
 
   // ---------- WebSocket ----------
-  const agentWss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+  // 24 MB: fayl menejeridagi "o'qish/yuklab olish" natijasi (base64, ~15 MB fayl uchun) shu orqali keladi.
+  const agentWss = new WebSocketServer({ noServer: true, maxPayload: 24 * 1024 * 1024 });
   const panelWss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
 
   server.on("upgrade", (req, socket, head) => {
@@ -431,8 +527,14 @@ export function createApp(env) {
       let m;
       try { m = JSON.parse(raw); } catch { return; }
       if (m.type === "stats" && m.data && typeof m.data === "object") {
+        // Telegram token/chat ID ilovadan kelgan bo'lsa: Alerts'ni yangilaymiz, lekin
+        // bu ikkalasini lastStats'ga SAQLAMAYMIZ va panelga YUBORMAYMIZ (maxfiy ma'lumot).
+        const { telegramBotToken, telegramChatId, ...publicData } = m.data;
+        if (typeof telegramBotToken === "string" && telegramBotToken.trim()) alerts.token = telegramBotToken.trim();
+        if (typeof telegramChatId === "string" && telegramChatId.trim()) alerts.chatId = telegramChatId.trim();
+
         const prev = lastStats;
-        lastStats = { ...m.data, at: Date.now() };
+        lastStats = { ...publicData, at: Date.now() };
         const ramPct = lastStats.ramTotalMb > 0 ? (1 - lastStats.ramAvailMb / lastStats.ramTotalMb) * 100 : null;
         history.push({ t: lastStats.at, ram: ramPct, temp: lastStats.tempC, bat: lastStats.battery, load: lastStats.load });
         if (history.length > HISTORY_MAX) history.shift();

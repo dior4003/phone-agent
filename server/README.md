@@ -86,6 +86,13 @@ Buyruqlar telefonga yuboriladi va javobi kutiladi (`CMD_TIMEOUT_MS` gacha).
 | `GET /api/deploy/:dir/scripts` | `{ "ok": true, "scripts": { "dev": "...", "start": "..." } }` (package.json dan) |
 | `POST /api/deploy/:dir/run` | Tana: `{ "script": "dev" }`. Faqat `scripts` ro'yxatidagi nom qabul qilinadi; `pm2 start npm --name <dir> -- run <script>` orqali ishga tushadi |
 | `DELETE /api/deploy/:dir` | pm2 jarayonini va papkani butunlay o'chiradi |
+| `POST /api/flashlight/on` / `/off` | Orqa kamera fonarini yoqadi/o'chiradi |
+| `GET /api/files?path=` | Papka tarkibini ro'yxatlaydi (`{ok, entries:[{type,size,mtime,name}]}`) |
+| `POST /api/files/mkdir` | Tana: `{ "path": "..." }` |
+| `DELETE /api/files?path=` | Faylni yoki papkani (ichidagisi bilan) o'chiradi |
+| `POST /api/files/read` | Tana: `{ "path": "..." }`. Fon ishi (`jobId`) — natija base64 (limit 15 MB) |
+| `POST /api/files/write` | Tana: `{ "path": "...", "data": "<base64>" }`. Fon ishi |
+| `POST /api/files/unzip` | Tana: `{ "path": "a.zip", "dest": "papka" }`. Fon ishi |
 
 Muvaffaqiyatli javob: `200 { "ok": true, "out": "..." }`. Telefon buyruqni bajara olmasa: `200 { "ok": false, "out": "xato matni" }`.
 

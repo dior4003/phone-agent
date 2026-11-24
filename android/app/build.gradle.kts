@@ -3,6 +3,13 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Versiya GitHub Actions'dan env orqali keladi (git tegiga qarab); mahalliy
+// (Android Studio) build uchun xavfsiz standart qiymatlar ishlatiladi.
+val appVersionName = (System.getenv("APP_VERSION_NAME") ?: "0.0.0-local").also {
+    println("Phone Agent versiyasi: $it")
+}
+val appVersionCode = System.getenv("APP_VERSION_CODE")?.toIntOrNull() ?: 1
+
 android {
     namespace = "uz.dior.agent"
     compileSdk = 34
@@ -11,8 +18,12 @@ android {
         applicationId = "uz.dior.agent"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = appVersionCode
+        versionName = appVersionName
+    }
+
+    buildFeatures {
+        buildConfig = true // BuildConfig.VERSION_NAME orqali versiyani ilova ichida ko'rsatish uchun
     }
 
     compileOptions {

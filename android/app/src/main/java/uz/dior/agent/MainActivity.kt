@@ -54,6 +54,8 @@ class MainActivity : AppCompatActivity() {
         val token = field(prefs.token, "Agent token", secret = true)
         val user = field(prefs.termuxUser, "u0_a285")
         val laravel = field(prefs.laravelDir, "myapp")
+        val tgToken = field(prefs.telegramBotToken, "123456:ABC-DEF... (@BotFather)", secret = true)
+        val tgChatId = field(prefs.telegramChatId, "Masalan: 123456789 (@userinfobot)")
         val rootView = TextView(this).apply { text = "Root: tekshirilmoqda..." }
         stateView = TextView(this).apply { textSize = 15f; setPadding(0, dp(10), 0, dp(10)) }
 
@@ -62,8 +64,17 @@ class MainActivity : AppCompatActivity() {
             prefs.token = token.text.toString().trim()
             prefs.termuxUser = user.text.toString().trim()
             prefs.laravelDir = laravel.text.toString().trim().ifEmpty { "myapp" }
+            prefs.telegramBotToken = tgToken.text.toString().trim()
+            prefs.telegramChatId = tgChatId.text.toString().trim()
         }
 
+        val saveBtn = Button(this).apply {
+            text = "Saqlash"
+            setOnClickListener {
+                save()
+                stateView.text = "Saqlandi. Telegram sozlamalari ${if (prefs.telegramBotToken.isNotBlank()) "~5 soniyada" else "o'chirilgan holatda"} kuchga kiradi."
+            }
+        }
         val startBtn = Button(this).apply {
             text = "Agentni yoqish"
             setOnClickListener {
@@ -108,8 +119,13 @@ class MainActivity : AppCompatActivity() {
             addView(user)
             addView(label("Laravel loyiha papkasi (Termux home ichida)"))
             addView(laravel)
+            addView(label("Telegram bot tokeni (ixtiyoriy, ogohlantirish uchun)"))
+            addView(tgToken)
+            addView(label("Telegram chat ID (ixtiyoriy)"))
+            addView(tgChatId)
             addView(rootView as View)
             addView(stateView)
+            addView(saveBtn)
             addView(startBtn)
             addView(stopBtn)
             addView(batteryBtn)

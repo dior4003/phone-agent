@@ -1,6 +1,8 @@
 package uz.dior.agent
 
 import android.content.Context
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -26,13 +28,18 @@ class Actions(private val ctx: Context) {
         private val OPS = setOf("start", "stop", "restart")
 
         // Loyiha yuklash uchun: faqat https:// manzillar, qobiq belgilarisiz (;, |, &, $, `, ', ", bo'sh joy)
-        private val REPO_URL = Regex("^https://[A-Za-z0-9@:%._+-]{1,80}(/[A-Za-z0-9._+-]{1,80}){1,6}(\\.git)?$")
+        // Birinchi segment (host + ixtiyoriy https://token@host kabi autentifikatsiya) uzunroq
+        // chegaraga ega — GitHub'ning "fine-grained" shaxsiy tokenlari 90+ belgi bo'lishi mumkin.
+        private val REPO_URL = Regex("^https://[A-Za-z0-9@:%._+-]{1,220}(/[A-Za-z0-9._+-]{1,80}){1,6}(\\.git)?$")
         private val SCRIPT_NAME = Regex("^[A-Za-z0-9_:.-]{1,40}$")
         private val NET_OPS = setOf("status", "wifi_on", "wifi_off", "bt_on", "bt_off", "data_on", "data_off")
+        private const val MAX_FILE_BYTES = 15 * 1024 * 1024 // server/src/app.js dagi MAX_FILE_BYTES bilan bir xil
     }
 
     private val prefs = Prefs(ctx)
     private val user get() = prefs.termuxUser
+    private var torchCameraId: String? = null
+    @Volatile private var torchOn = false
 
     /** Ko'rsatish mumkin bo'lgan loglar (nom -> yo'l). */
     fun logs(): Map<String, String> {
@@ -56,6 +63,8 @@ class Actions(private val ctx: Context) {
             "brightness" -> brightness(op, m.optInt("value", -1))
             "find" -> find(op)
             "deploy" -> deploy(op, target, m)
+            "flashlight" -> flashlight(op)
+            "file" -> file(op, target, m)
             else -> false to "Noma'lum amal"
         }
     }
@@ -219,6 +228,117 @@ class Actions(private val ctx: Context) {
                 Root.run(user, "cd $target && pm2 start npm --name '$target' -- run '$script'")
             }
             "remove" -> Root.run(user, "pm2 delete '$target' >/dev/null 2>&1; rm -rf -- $target")
+            else -> false to "Noto'g'ri amal"
+        }
+    }
+
+    /** Chaqmoq (orqa kamera fonari): yoqish/o'chirish. Root talab qilmaydi. */
+    private fun flashlight(op: String): Pair<Boolean, String> {
+        if (op !in setOf("on", "off", "status")) return false to "Noto'g'ri amal"
+        if (op == "status") return true to JSONObject().put("on", torchOn).toString()
+        val cm = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val id = torchCameraId ?: try {
+            cm.cameraIdList.firstOrNull { id ->
+                cm.getCameraCharacteristics(id).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            }
+        } catch (e: Exception) { null }
+        if (id == null) return false to "Chaqmoq (flash) topilmadi"
+        torchCameraId = id
+        return try {
+            val on = op == "on"
+            cm.setTorchMode(id, on)
+            torchOn = on
+            true to if (on) "Chaqmoq yoqildi" else "Chaqmoq o'chirildi"
+        } catch (e: Exception) {
+            false to "Bajarib bo'lmadi: ${e.message}"
+        }
+    }
+
+    /** Berilgan nisbiy yo'lni tekshiradi: "/" bilan boshlanmasin, ".." bo'lmasin. */
+    private fun safeRel(raw: String): String? {
+        val norm = raw.replace('\\', '/').trim()
+        if (norm.isEmpty()) return "."
+        if (norm.startsWith("/") || norm.length > 400) return null
+        for (s in norm.split("/")) {
+            if (s.isEmpty() || s == "." || s == "..") return null
+            if (s.any { it.code < 32 }) return null
+        }
+        return norm
+    }
+
+    /**
+     * Fayl menejeri: faqat Termux foydalanuvchisi uy papkasi ichida (tizim fayllariga yo'l yopiq).
+     * list/read/write/mkdir/delete/unzip — erkin shell buyrug'i yo'q.
+     */
+    private fun file(op: String, targetRaw: String, m: JSONObject): Pair<Boolean, String> {
+        val rel = safeRel(targetRaw) ?: return false to "Noto'g'ri yo'l"
+        return when (op) {
+            "list" -> {
+                val cmd = "if [ ! -d '$rel' ]; then echo __NODIR__; exit 4; fi; " +
+                    "cd '$rel' && find . -mindepth 1 -maxdepth 1 -print0 | while IFS= read -r -d '' f; do " +
+                    "n=\"\${f#./}\"; if [ -d \"\$f\" ]; then t=d; else t=f; fi; " +
+                    "sz=\$(stat -c %s \"\$f\" 2>/dev/null || echo 0); " +
+                    "mt=\$(stat -c %Y \"\$f\" 2>/dev/null || echo 0); " +
+                    "printf '%s\\t%s\\t%s\\t%s\\n' \"\$t\" \"\$sz\" \"\$mt\" \"\$n\"; done"
+                val (ok, out) = Root.run(user, cmd)
+                if (out.trim() == "__NODIR__") return false to "Papka topilmadi"
+                if (!ok) return false to out.take(1500)
+                val arr = JSONArray()
+                for (line in out.split("\n")) {
+                    if (line.isBlank()) continue
+                    val parts = line.split("\t")
+                    if (parts.size < 4) continue
+                    arr.put(
+                        JSONObject()
+                            .put("type", parts[0])
+                            .put("size", parts[1].toLongOrNull() ?: 0L)
+                            .put("mtime", parts[2].toLongOrNull() ?: 0L)
+                            .put("name", parts.subList(3, parts.size).joinToString("\t"))
+                    )
+                }
+                true to arr.toString()
+            }
+            "read" -> {
+                if (rel == ".") return false to "Fayl tanlanmagan"
+                val (okSz, sz) = Root.run(user, "stat -c %s '$rel' 2>/dev/null || echo -1")
+                val size = sz.trim().toLongOrNull() ?: -1
+                if (size < 0) return false to "Fayl topilmadi"
+                if (size > MAX_FILE_BYTES) return false to "Fayl juda katta (limit ${MAX_FILE_BYTES / 1024 / 1024} MB)"
+                // base64 ~4/3 marta kattalashtiradi; natija shuncha uzun bo'lishi mumkinligini hisobga olamiz
+                val maxOut = (MAX_FILE_BYTES.toLong() * 4 / 3 + 4096).toInt()
+                val (ok, out) = Root.runLong(user, "base64 -w0 '$rel' 2>/dev/null || base64 '$rel' 2>/dev/null | tr -d '\\n'", 120, maxOut)
+                if (!ok || out.isBlank()) return false to "O'qib bo'lmadi"
+                true to out.trim()
+            }
+            "write" -> {
+                if (rel == ".") return false to "Fayl nomi kerak"
+                val b64 = m.optString("data")
+                if (b64.isEmpty()) return false to "Ma'lumot bo'sh"
+                val bytes = try {
+                    android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                } catch (e: Exception) {
+                    return false to "Noto'g'ri ma'lumot (base64)"
+                }
+                if (bytes.size > MAX_FILE_BYTES) return false to "Fayl juda katta (limit ${MAX_FILE_BYTES / 1024 / 1024} MB)"
+                val cmd = "mkdir -p -- \"\$(dirname '$rel')\" 2>/dev/null; cat > '$rel' && echo __OK__ || echo __FAIL__"
+                val (ok, out) = Root.writeStdin(user, cmd, bytes, 120)
+                if (!ok || !out.contains("__OK__")) return false to "Yozib bo'lmadi: ${out.take(500)}"
+                true to "Saqlandi: $rel"
+            }
+            "mkdir" -> if (rel == ".") false to "Papka nomi kerak" else Root.run(user, "mkdir -p -- '$rel'")
+            "delete" -> if (rel == ".") false to "Bu papkani o'chirib bo'lmaydi" else Root.run(user, "rm -rf -- '$rel'")
+            "unzip" -> {
+                if (rel == ".") return false to "Zip fayl tanlanmagan"
+                val dest = safeRel(m.optString("dest")) ?: return false to "Noto'g'ri manzil papka"
+                val cmd = "command -v unzip >/dev/null 2>&1 || { echo __NOUNZIP__; exit 127; }; " +
+                    "test -f '$rel' || { echo __NOFILE__; exit 4; }; " +
+                    "mkdir -p -- '$dest' && unzip -o -q '$rel' -d '$dest' 2>&1 && echo __OK__ || echo __FAIL__"
+                val (ok, out) = Root.runLong(user, cmd, 300)
+                if (out.contains("__NOUNZIP__")) return false to "Termux'da unzip o'rnatilmagan. Bajaring: pkg install unzip"
+                if (out.contains("__NOFILE__")) return false to "Zip fayl topilmadi"
+                if (!ok || !out.contains("__OK__")) return false to out.take(1500)
+                true to "Yoyildi: $dest"
+            }
             else -> false to "Noto'g'ri amal"
         }
     }

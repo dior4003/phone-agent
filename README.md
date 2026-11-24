@@ -21,7 +21,10 @@ Telefon serverga **o'zi ulanadi** (outbound WebSocket), shuning uchun port ochis
 | Tarmoq | Wi-Fi, Bluetooth, mobil internet holatini ko'rish va tugma orqali yoqish/o'chirish |
 | Ekran yorqinligi | 0-255 oralig'ida slayder orqali o'rnatish |
 | Telefonni topish | Jim/tebranish rejimida ham baland ovoz chalish (2 daqiqada o'zi to'xtaydi) |
-| Yangi loyiha yuklash | Git repo (https) dan klonlash → `npm install` → `package.json` dagi tayyor skriptdan (masalan `dev`, `start`) birini tanlab pm2 orqali ishga tushirish. Erkin shell buyrug'i yo'q — faqat shu loyihaning o'z skriptlari |
+| Yangi loyiha yuklash | Git repo (https, shu jumladan **private/maxfiy** — shaxsiy token maydoni orqali) dan klonlash → `npm install` → `package.json` dagi tayyor skriptdan (masalan `dev`, `start`) birini tanlab pm2 orqali ishga tushirish. Erkin shell buyrug'i yo'q — faqat shu loyihaning o'z skriptlari |
+| Chaqmoq | Orqa kamera fonarini yoqish/o'chirish |
+| Fayl menejeri | Alohida oyna: Termux papkalarida yurish, yaratish/o'chirish, yuklash (zip ham), yuklab olish, zipni yoyish, va bitta bosqichli papka uchun "o'rnatish + ishga tushirish" |
+| Telegram | Bot tokeni va chat ID'ni serverning `.env` faylida **yoki** to'g'ridan-to'g'ri Android ilova sozlamalaridan kiritish mumkin |
 | Xavfsizlik | Parol + ixtiyoriy 2FA (TOTP), JWT, urinishlarni cheklash, audit jurnali, faqat ro'yxatdagi amallar |
 | Ogohlantirish | Telegram: harorat, RAM, batareya, xotira, servis to'xtashi, telefon aloqasi uzilishi |
 | API | To'liq REST API (qarang: `server/README.md`) |
@@ -81,16 +84,40 @@ Android Studio **shart emas**. APK GitHub'da yig'iladi:
 
 Telefon qayta yonganda agent o'zi ko'tariladi (ilova bir marta yoqilgan bo'lsa).
 
+## Versiya chiqarish (release)
+
+Oddiy `git push` (yoki **Actions → Run workflow**) har doim ham APK yig'adi, lekin
+u faqat `Artifacts` bo'limida, `0.<build-raqami>-dev` nomi bilan chiqadi (vaqtinchalik,
+kirish uchun GitHub hisobingiz kerak).
+
+Rasmiy versiya (masalan `1.0.0`) chiqarish uchun:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Shundan so'ng GitHub Actions avtomatik: Android ilovani shu versiya nomi bilan
+(`versionName = 1.0.0`) yig'adi, **Releases** bo'limida yangi chiqarilish (release)
+yaratadi va APK'ni (`phone-agent-1.0.0.apk`) shu yerga biriktiradi — havolasini
+istalgan odamga (yoki o'zingizga, telefonga to'g'ridan-to'g'ri) yuborish mumkin,
+Actions/Artifacts ichiga kirish shart emas.
+
+Keyingi safar yangilansa: `CHANGELOG.md` ga qisqacha nima qo'shilganini yozib,
+versiyani ko'taring (`v1.1.0`, `v2.0.0` kabi — https://semver.org tartibida) va
+yana teg bilan push qiling.
+
 ## Telefonda Termux tayyorligi
 
 Agent buyruqlarni Termux ichidagi dasturlarga yuboradi, shuning uchun ular o'rnatilgan bo'lishi kerak:
 
 ```bash
-pkg install nginx php php-fpm mariadb nodejs procps git
+pkg install nginx php php-fpm mariadb nodejs procps git unzip
 npm install -g pm2
 ```
 
 `git` — "Yangi loyiha yuklash" bo'limi uchun kerak (repo klonlash).
+`unzip` — Fayl menejeridagi "Yoyish" (extract) tugmasi uchun kerak.
 
 Servislar `pidof` orqali tekshiriladi. Nomlar: `mariadbd` yoki `mysqld`, `nginx`, `php-fpm`.
 

@@ -15,7 +15,7 @@ Kotlin, minSdk 26 (Android 8+), targetSdk 34. Rootli telefon va Magisk kerak.
 |---|---|
 | `MainActivity.kt` | Sozlamalar oynasi, yoqish/o'chirish, ulanish holati |
 | `AgentService.kt` | WebSocket ulanishi, statistika sikli, buyruqlarni qabul qilish |
-| `Actions.kt` | **Ruxsat etilgan amallar ro'yxati** (servislar, loglar, pm2, reboot, tarmoq, yorqinlik, loyiha yuklash) |
+| `Actions.kt` | **Ruxsat etilgan amallar ro'yxati** (servislar, loglar, pm2, reboot, tarmoq, yorqinlik, loyiha yuklash, chaqmoq, fayl menejeri) |
 | `Stats.kt` | RAM, batareya, harorat, xotira, yuklama, servis holati |
 | `Root.kt` | libsu orqali root; buyruqlar Termux foydalanuvchisi nomidan bajariladi |
 | `Finder.kt` | "Telefonni topish" — ALARM ovoz oqimi orqali jim rejimda ham eshitiladigan signal |

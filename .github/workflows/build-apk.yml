@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write   # tegli build uchun GitHub Release yaratish huquqi
 
 jobs:
   build:
@@ -20,11 +24,46 @@ jobs:
         with:
           gradle-version: 8.7
 
+      # Versiyani aniqlaymiz:
+      #  - v1.2.3 tegi bilan push bo'lsa  -> versionName = "1.2.3" (haqiqiy release)
+      #  - boshqa har qanday holatda      -> versionName = "0.<build raqami>-dev" (sinov build)
+      - name: Versiyani hisoblash
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v*.*.* ]]; then
+            NAME="${GITHUB_REF#refs/tags/v}"
+            IS_RELEASE=true
+          else
+            NAME="0.${GITHUB_RUN_NUMBER}-dev"
+            IS_RELEASE=false
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "is_release=$IS_RELEASE" >> "$GITHUB_OUTPUT"
+          echo "Versiya: $NAME (release: $IS_RELEASE)"
+
       - name: Build debug APK
         working-directory: android
+        env:
+          APP_VERSION_NAME: ${{ steps.ver.outputs.name }}
+          APP_VERSION_CODE: ${{ github.run_number }}
         run: gradle assembleDebug --no-daemon
+
+      - name: APK'ni versiya nomi bilan ko'chirish
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk \
+             "dist/phone-agent-${{ steps.ver.outputs.name }}.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: phone-agent-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: phone-agent-${{ steps.ver.outputs.name }}
+          path: dist/phone-agent-${{ steps.ver.outputs.name }}.apk
+
+      # Faqat v1.2.3 kabi teg bilan push qilinganda: GitHub Release yaratib, APK'ni biriktiramiz
+      - name: GitHub Release yaratish
+        if: steps.ver.outputs.is_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Phone Agent v${{ steps.ver.outputs.name }}"
+          files: dist/phone-agent-${{ steps.ver.outputs.name }}.apk
+          generate_release_notes: true

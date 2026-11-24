@@ -120,6 +120,14 @@
         </div>
       </section>
 
+      <section aria-labelledby="h-flash">
+        <h2 id="h-flash">Chaqmoq</h2>
+        <div class="row-controls">
+          <button id="flashOn" class="primary">Yoqish</button>
+          <button id="flashOff" class="ghost">O'chirish</button>
+        </div>
+      </section>
+
       <section aria-labelledby="h-bright">
         <h2 id="h-bright">Ekran yorqinligi</h2>
         <div class="row-controls bright-row">
@@ -137,8 +145,11 @@
           <input id="deployRepo" placeholder="https://github.com/foydalanuvchi/loyiha.git">
           <label class="sr" for="deployDir">Papka nomi</label>
           <input id="deployDir" placeholder="papka-nomi">
+          <label class="sr" for="deployToken">Shaxsiy token (private repo uchun, ixtiyoriy)</label>
+          <input id="deployToken" type="password" placeholder="Shaxsiy token (private repo uchun, ixtiyoriy)">
           <button id="deployGo" class="primary">Yuklab olish</button>
         </div>
+        <p class="muted">Private (maxfiy) repo uchun: GitHub'da Settings → Developer settings → Personal access tokens dan token yarating va shu yerga kiriting. Token faqat shu so'rov uchun ishlatiladi, serverda alohida saqlanmaydi.</p>
         <p id="deployStatus" class="muted">&nbsp;</p>
         <ul id="deployScripts" class="rows" hidden></ul>
       </section>
@@ -164,6 +175,33 @@
         <div class="h-row"><h2 id="h-audit">Amallar jurnali</h2><button id="auditRefresh" class="ghost">Yangilash</button></div>
         <ul id="audit" class="rows compact"></ul>
       </section>
+
+      <section aria-labelledby="h-fm">
+        <h2 id="h-fm">Fayl menejeri</h2>
+        <p class="muted">Termux foydalanuvchisi papkalari bilan cheklangan (tizim fayllariga yo'l yopiq). Zip yuklash, yoyish, bog'liqliklarni o'rnatish va ishga tushirish shu yerda.</p>
+        <button id="fmOpen" class="primary">Fayl menejerini ochish</button>
+      </section>
+
+      <div id="fmModal" class="fm-modal" hidden>
+        <div class="fm-box">
+          <div class="fm-head">
+            <div id="fmCrumbs" class="fm-crumbs">🏠</div>
+            <button id="fmClose" class="ghost">Yopish</button>
+          </div>
+          <div class="fm-toolbar">
+            <button id="fmUp" class="ghost">⬆ Yuqoriga</button>
+            <button id="fmRefresh" class="ghost">⟳ Yangilash</button>
+            <button id="fmMkdir" class="ghost">+ Papka</button>
+            <label class="fm-upload-btn">
+              ⇧ Yuklash (zip ham bo'ladi)
+              <input id="fmUpload" type="file" multiple hidden>
+            </label>
+            <button id="fmBuild" class="primary" hidden>▶ O'rnatish va ishga tushirish</button>
+          </div>
+          <ul id="fmList" class="rows fm-list"><li class="empty">Yuklanmoqda…</li></ul>
+          <p id="fmStatus" class="muted">&nbsp;</p>
+        </div>
+      </div>
 
       <section aria-labelledby="h-danger" class="danger-zone">
         <h2 id="h-danger">Telefonni boshqarish</h2>

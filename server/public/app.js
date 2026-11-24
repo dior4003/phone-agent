@@ -129,7 +129,7 @@ function renderStats(s) {
   ph.classList.toggle("low", bat <= 20 && !s.charging);
   ph.classList.toggle("warm", s.tempC >= 40 && s.tempC < 45);
   ph.classList.toggle("hot", s.tempC >= 45);
-  $("#deviceName").textContent = [s.device, s.android ? "Android " + s.android : ""].filter(Boolean).join(", ") || "\u00a0";
+  $("#deviceName").textContent = [s.device, s.android ? "Android " + s.android : "", s.agentVersion ? "agent v" + s.agentVersion : ""].filter(Boolean).join(", ") || "\u00a0";
 
   // Plitkalar
   $("#ramVal").textContent = `${gb(used)} / ${gb(s.ramTotalMb)} GB`;
@@ -384,6 +384,18 @@ $("#findStop").addEventListener("click", async () => {
   else toast(r.data.error || r.data.out || "Xato", true);
 });
 
+// ---------- Chaqmoq ----------
+$("#flashOn").addEventListener("click", async () => {
+  const r = await api("/api/flashlight/on", { method: "POST" });
+  if (r.ok && r.data.ok) toast("Chaqmoq yoqildi");
+  else toast(r.data.error || r.data.out || "Xato", true);
+});
+$("#flashOff").addEventListener("click", async () => {
+  const r = await api("/api/flashlight/off", { method: "POST" });
+  if (r.ok && r.data.ok) toast("Chaqmoq o'chirildi");
+  else toast(r.data.error || r.data.out || "Xato", true);
+});
+
 // ---------- Ekran yorqinligi ----------
 async function loadBrightness() {
   if (!S.agent) return;
@@ -399,6 +411,169 @@ $("#brightSet").addEventListener("click", async () => {
   const r = await api("/api/brightness", { method: "POST", body: { value } });
   if (r.ok && r.data.ok) toast("Yorqinlik o'rnatildi");
   else toast(r.data.error || r.data.out || "Xato", true);
+});
+
+// ---------- Fayl menejeri ----------
+let fmPath = ".";
+
+function fmtBytes(n) {
+  if (!Number.isFinite(n)) return "";
+  if (n < 1024) return n + " B";
+  if (n < 1024 ** 2) return (n / 1024).toFixed(1) + " KB";
+  if (n < 1024 ** 3) return (n / 1024 ** 2).toFixed(1) + " MB";
+  return (n / 1024 ** 3).toFixed(1) + " GB";
+}
+
+function fmJoin(path, name) {
+  return path === "." ? name : path + "/" + name;
+}
+
+function fmRenderCrumbs(path) {
+  const wrap = $("#fmCrumbs");
+  wrap.replaceChildren();
+  wrap.append(el("span", { onclick: () => fmLoad(".") }, "🏠"));
+  if (path === ".") return;
+  const parts = path.split("/");
+  let acc = "";
+  parts.forEach((part, i) => {
+    acc = acc ? acc + "/" + part : part;
+    const target = acc;
+    wrap.append(document.createTextNode(" / "));
+    wrap.append(el("span", i < parts.length - 1 ? { onclick: () => fmLoad(target) } : {}, part));
+  });
+}
+
+async function fmLoad(path) {
+  fmPath = path;
+  $("#fmList").replaceChildren(el("li", { class: "empty" }, "Yuklanmoqda…"));
+  $("#fmStatus").textContent = "\u00a0";
+  const r = await api("/api/files?path=" + encodeURIComponent(path));
+  if (!r.ok || !r.data.ok) {
+    $("#fmList").replaceChildren(el("li", { class: "empty" }, r.data.error || r.data.out || "Xato"));
+    return;
+  }
+  fmRenderCrumbs(path);
+  const entries = (r.data.entries || []).slice().sort((a, b) => (b.type === "d") - (a.type === "d") || a.name.localeCompare(b.name));
+  $("#fmList").replaceChildren();
+  if (!entries.length) $("#fmList").append(el("li", { class: "empty" }, "Papka bo'sh"));
+  for (const e of entries) {
+    const isDir = e.type === "d";
+    const nameSpan = el("span", { class: "name" + (isDir ? " dir" : ""), onclick: isDir ? () => fmLoad(fmJoin(path, e.name)) : null }, (isDir ? "📁 " : "📄 ") + e.name);
+    const metaSpan = el("span", { class: "meta grow" }, isDir ? "" : fmtBytes(e.size));
+    const acts = el("div", { class: "acts" });
+    if (!isDir) {
+      acts.append(el("button", { class: "ghost", onclick: () => fmDownload(path, e.name) }, "⬇"));
+      if (/\.zip$/i.test(e.name)) acts.append(el("button", { class: "ghost", onclick: () => fmUnzip(path, e.name) }, "Yoyish"));
+    }
+    acts.append(el("button", { class: "danger", onclick: () => fmDelete(path, e.name, isDir) }, "O'chirish"));
+    $("#fmList").append(el("li", {}, nameSpan, metaSpan, acts));
+  }
+  // "O'rnatish va ishga tushirish" faqat home ostidagi bitta bosqichli papka uchun ko'rinadi
+  // (deploy API shunday papkalar bilan ishlaydi — fayl menejerining ichkariroq papkalari uchun emas).
+  const canBuild = path !== "." && !path.includes("/");
+  $("#fmBuild").hidden = !canBuild;
+  $("#fmBuild").dataset.dir = canBuild ? path : "";
+}
+
+async function fmDownload(path, name) {
+  const full = fmJoin(path, name);
+  $("#fmStatus").textContent = `Yuklab olinmoqda: ${name}…`;
+  const r = await runJob("/api/files/read", { path: full }, (s) => { $("#fmStatus").textContent = `Yuklab olinmoqda: ${name}… ${s} s`; });
+  if (!r.ok || !r.data.ok) { $("#fmStatus").textContent = r.data.error || r.data.out || "Yuklab olishda xato"; return; }
+  try {
+    const bin = atob(r.data.out);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes]));
+    const a = el("a", { href: url, download: name });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    $("#fmStatus").textContent = `Yuklandi: ${name}`;
+  } catch {
+    $("#fmStatus").textContent = "Faylni o'qib bo'lmadi";
+  }
+}
+
+async function fmDelete(path, name, isDir) {
+  const ok = await confirmDialog(`"${name}"${isDir ? " (papka, ichidagi hammasi bilan)" : ""} butunlay o'chirilsinmi?`, "O'chirish");
+  if (!ok) return;
+  const r = await api("/api/files?path=" + encodeURIComponent(fmJoin(path, name)), { method: "DELETE" });
+  if (r.ok && r.data.ok) { toast(`"${name}" o'chirildi`); fmLoad(path); }
+  else toast(r.data.error || r.data.out || "Xato", true);
+}
+
+async function fmUnzip(path, name) {
+  const full = fmJoin(path, name);
+  const dest = fmJoin(path, name.replace(/\.zip$/i, ""));
+  const ok = await confirmDialog(`"${name}" "${dest}" papkasiga yoyilsinmi?`, "Yoyish");
+  if (!ok) return;
+  $("#fmStatus").textContent = `Yoyilmoqda: ${name}…`;
+  const r = await runJob("/api/files/unzip", { path: full, dest }, (s) => { $("#fmStatus").textContent = `Yoyilmoqda… ${s} s`; });
+  if (!r.ok || !r.data.ok) { $("#fmStatus").textContent = r.data.error || r.data.out || "Yoyishda xato"; return; }
+  $("#fmStatus").textContent = `Yoyildi: ${dest}`;
+  fmLoad(fmPath);
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(new Error("O'qib bo'lmadi"));
+    reader.readAsDataURL(file);
+  });
+}
+
+$("#fmUpload").addEventListener("change", async (e) => {
+  const files = Array.from(e.currentTarget.files || []);
+  e.currentTarget.value = "";
+  for (const file of files) {
+    if (file.size > 15 * 1024 * 1024) { toast(`"${file.name}" juda katta (limit 15 MB)`, true); continue; }
+    $("#fmStatus").textContent = `Yuklanmoqda: ${file.name}…`;
+    let data;
+    try { data = await fileToBase64(file); } catch { toast(`"${file.name}" o'qilmadi`, true); continue; }
+    const full = fmJoin(fmPath, file.name);
+    const r = await runJob("/api/files/write", { path: full, data }, (s) => { $("#fmStatus").textContent = `Yuklanmoqda: ${file.name}… ${s} s`; });
+    if (!r.ok || !r.data.ok) toast(r.data.error || r.data.out || `"${file.name}" yuklashda xato`, true);
+  }
+  $("#fmStatus").textContent = "Tayyor.";
+  fmLoad(fmPath);
+});
+
+$("#fmMkdir").addEventListener("click", async () => {
+  const name = (prompt("Yangi papka nomi:") || "").trim();
+  if (!name) return;
+  const r = await api("/api/files/mkdir", { method: "POST", body: { path: fmJoin(fmPath, name) } });
+  if (r.ok && r.data.ok) fmLoad(fmPath);
+  else toast(r.data.error || r.data.out || "Xato", true);
+});
+
+$("#fmUp").addEventListener("click", () => {
+  if (fmPath === ".") return;
+  const idx = fmPath.lastIndexOf("/");
+  fmLoad(idx === -1 ? "." : fmPath.slice(0, idx));
+});
+$("#fmRefresh").addEventListener("click", () => fmLoad(fmPath));
+$("#fmOpen").addEventListener("click", () => { $("#fmModal").hidden = false; fmLoad("."); });
+$("#fmClose").addEventListener("click", () => { $("#fmModal").hidden = true; });
+
+$("#fmBuild").addEventListener("click", async () => {
+  const dir = $("#fmBuild").dataset.dir;
+  if (!dir) return;
+  $("#fmStatus").textContent = "Bog'liqliklar o'rnatilmoqda (npm install)… bir necha daqiqa cho'zilishi mumkin.";
+  let r = await runJob(`/api/deploy/${encodeURIComponent(dir)}/install`, {}, (s) => { $("#fmStatus").textContent = `npm install… ${s} s`; });
+  if (!r.ok || !r.data.ok) { $("#fmStatus").textContent = r.data.error || r.data.out || "npm install xato berdi"; return; }
+
+  r = await api(`/api/deploy/${encodeURIComponent(dir)}/scripts`);
+  if (!r.ok || !r.data.ok) { $("#fmStatus").textContent = r.data.error || r.data.out || "Skriptlarni o'qib bo'lmadi"; return; }
+  const names = Object.keys(r.data.scripts || {});
+  if (!names.length) { $("#fmStatus").textContent = "package.json ichida \"scripts\" topilmadi."; return; }
+  const choice = (prompt(`Qaysi skriptni ishga tushiramiz?\n${names.join(", ")}`, names.includes("start") ? "start" : names[0]) || "").trim();
+  if (!choice) return;
+  if (!names.includes(choice)) { toast("Bu skript ro'yxatda yo'q", true); return; }
+
+  const r2 = await api(`/api/deploy/${encodeURIComponent(dir)}/run`, { method: "POST", body: { script: choice } });
+  if (r2.ok && r2.data.ok) { toast(`"${dir}" (${choice}) pm2 orqali ishga tushirildi`); $("#fmStatus").textContent = "Ishga tushirildi."; }
+  else toast(r2.data.error || r2.data.out || "Xato", true);
 });
 
 // ---------- Yangi loyiha yuklash ----------
@@ -477,9 +652,18 @@ async function runDeployScript(dir, script, btn) {
   loadAudit();
 }
 
+// Repo manzilidagi private (shaxsiy) tokenni https://TOKEN@host/... ko'rinishida biriktiradi.
+// Agar foydalanuvchi manzilga allaqachon o'zi "user:token@" qo'shgan bo'lsa, ustiga yozmaydi.
+function withToken(repo, token) {
+  if (!token) return repo;
+  if (/^https:\/\/[^/]*@/.test(repo)) return repo; // allaqachon autentifikatsiya bor
+  return repo.replace(/^https:\/\//, `https://${encodeURIComponent(token)}@`);
+}
+
 $("#deployGo").addEventListener("click", async () => {
-  const repo = $("#deployRepo").value.trim();
+  const repo = withToken($("#deployRepo").value.trim(), $("#deployToken").value.trim());
   const dir = $("#deployDir").value.trim();
+  $("#deployToken").value = ""; // ishlatilgach darhol tozalaymiz
   if (!repo || !dir) return deployStatus("Repo manzili va papka nomini kiriting.", true);
   const btn = $("#deployGo");
   btn.disabled = true;

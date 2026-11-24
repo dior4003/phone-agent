@@ -38,6 +38,13 @@ object Stats {
         j.put("load", Root.raw("cat /proc/loadavg").trim().split(" ").firstOrNull()?.toDoubleOrNull() ?: 0.0)
         j.put("device", Build.MODEL)
         j.put("android", Build.VERSION.RELEASE)
+        j.put("agentVersion", BuildConfig.VERSION_NAME)
+
+        // Telegram sozlamalari ilovadan kiritilgan bo'lsa, serverga shu yerdan boradi
+        // (server bularni lastStats'ga saqlamaydi va panelga yubormaydi — faqat Alerts uchun ishlatadi).
+        val prefs = Prefs(ctx)
+        if (prefs.telegramBotToken.isNotBlank()) j.put("telegramBotToken", prefs.telegramBotToken)
+        if (prefs.telegramChatId.isNotBlank()) j.put("telegramChatId", prefs.telegramChatId)
 
         // Servislar holati: bitta shell chaqiruvida
         val script = Actions.SERVICES.entries.joinToString("; ") { (name, s) ->
