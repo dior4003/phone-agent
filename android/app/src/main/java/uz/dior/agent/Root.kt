@@ -24,8 +24,10 @@ object Root {
         "export PATH=\$HOME/.npm-global/bin:\$HOME/.local/bin:\$PREFIX/bin:\$PATH; " +
         "export LD_LIBRARY_PATH=\$PREFIX/lib; " +
         "if [ -f \"\$PREFIX/lib/libtermux-exec.so\" ]; then export LD_PRELOAD=\"\$PREFIX/lib/libtermux-exec.so\"; fi; " +
-        "pm2() { node \"\$(command -v pm2)\" \"\$@\"; }; " +
-        "npm() { node \"\$(command -v npm)\" \"\$@\"; }; " +
+        "_PM2=\$(command -v pm2 2>/dev/null); " +
+        "_NPM=\$(command -v npm 2>/dev/null); " +
+        "pm2() { node \"\$_PM2\" \"\$@\"; }; " +
+        "npm() { node \"\$_NPM\" \"\$@\"; }; " +
         "mkdir -p \"\$TMPDIR\" 2>/dev/null; " +
         "cd \"\$HOME\"; "
 

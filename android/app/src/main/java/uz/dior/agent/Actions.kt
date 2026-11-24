@@ -251,7 +251,7 @@ class Actions(private val ctx: Context) {
                 if (!exists) return false to "Bu skript package.json \"scripts\" ichida topilmadi"
                 val qScript = shQuote(script)
                 val cmd = "command -v pm2 >/dev/null 2>&1 || { echo 'Termuxda pm2 ornatilmagan (npm install -g pm2)'; exit 127; }; " +
-                    "(cd $qTarget && (pm2 delete $qTarget >/dev/null 2>&1 || true) && pm2 start \"\$(command -v node)\" --name $qTarget -- \"\$(command -v npm)\" run $qScript 2>&1) && (pm2 save --force >/dev/null 2>&1 || true)"
+                    "(cd $qTarget && (pm2 delete $qTarget >/dev/null 2>&1 || true) && pm2 start \"\$(command -v node)\" --name $qTarget -- \"\$_NPM\" run $qScript 2>&1) && (pm2 save --force >/dev/null 2>&1 || true)"
                 val (okRun, runOut) = Root.run(user, cmd)
                 if (!okRun) false to runOut.takeLast(1500) else true to "Ishga tushirildi: $target ($script)"
             }
