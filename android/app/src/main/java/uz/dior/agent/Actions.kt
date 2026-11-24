@@ -79,9 +79,9 @@ class Actions(private val ctx: Context) {
             if (!NAME.matches(name)) return false to "Noto'g'ri nom"
             val qName = shQuote(name)
             val cmd = if (op == "delete") {
-                "pm2 delete $qName 2>&1 && pm2 save --force >/dev/null 2>&1 || true"
+                "pm2 delete $qName 2>&1 && (pm2 save --force >/dev/null 2>&1 || true)"
             } else {
-                "pm2 $op $qName 2>&1 && pm2 save --force >/dev/null 2>&1 || true"
+                "pm2 $op $qName 2>&1 && (pm2 save --force >/dev/null 2>&1 || true)"
             }
             return Root.run(user, cmd)
         }
@@ -251,8 +251,7 @@ class Actions(private val ctx: Context) {
                 if (!exists) return false to "Bu skript package.json \"scripts\" ichida topilmadi"
                 val qScript = shQuote(script)
                 val cmd = "command -v pm2 >/dev/null 2>&1 || { echo 'Termuxda pm2 ornatilmagan (npm install -g pm2)'; exit 127; }; " +
-                    "cd $qTarget && pm2 delete $qTarget >/dev/null 2>&1 || true; " +
-                    "pm2 start npm --name $qTarget -- run $qScript 2>&1 && pm2 save --force >/dev/null 2>&1 || true"
+                    "(cd $qTarget && (pm2 delete $qTarget >/dev/null 2>&1 || true) && pm2 start npm --name $qTarget -- run $qScript 2>&1) && (pm2 save --force >/dev/null 2>&1 || true)"
                 val (okRun, runOut) = Root.run(user, cmd)
                 if (!okRun) false to runOut.takeLast(1500) else true to "Ishga tushirildi: $target ($script)"
             }

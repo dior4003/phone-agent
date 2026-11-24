@@ -29,6 +29,7 @@ const S = {
   busy: new Set(),
   tab: "home",
   fmLoaded: false,
+  serverVersion: "",
 };
 const HIST_MAX = 360;
 
@@ -65,7 +66,7 @@ async function api(path, { method = "GET", body } = {}) {
   }
   let data = {};
   try { data = await r.json(); } catch {}
-  if (!r.ok && !data.error) data.error = "Xato (" + r.status + ")";
+  if (!r.ok && !data.error) data.error = data.out || ("Xato (" + r.status + ")");
   return { ok: r.ok, status: r.status, data };
 }
 
@@ -137,6 +138,7 @@ function setAgent(on) {
   if (!on) {
     S.stats = null;
     S.fmLoaded = false;
+    $("#verWarn").hidden = true;
     $("#deployScripts").hidden = true;
     $("#deployScripts").replaceChildren();
     deployStatus("");
@@ -145,8 +147,19 @@ function setAgent(on) {
   }
 }
 
+function checkVersion(agentVer) {
+  const w = $("#verWarn");
+  if (!S.serverVersion || !agentVer || agentVer === S.serverVersion) {
+    w.hidden = true;
+    return;
+  }
+  w.textContent = `Diqqat: Server (v${S.serverVersion}) va Phone Agent APK (v${agentVer}) versiyalari mos emas! GitHub Actions'dan mos APK'ni o'rnating.`;
+  w.hidden = false;
+}
+
 function renderStats(s) {
   S.stats = s;
+  checkVersion(s.agentVersion);
   const used = s.ramTotalMb - s.ramAvailMb;
   const pct = s.ramTotalMb > 0 ? (used / s.ramTotalMb) * 100 : 0;
 
@@ -425,6 +438,10 @@ async function start() {
   const h = await api("/api/history");
   if (h.ok) for (const x of h.data.samples || []) pushHist(x);
   const st = await api("/api/status");
+  if (st.ok && st.data.serverVersion) {
+    S.serverVersion = st.data.serverVersion;
+    $("#srvVer").textContent = "v" + S.serverVersion;
+  }
   if (st.ok && st.data.agent) {
     setAgent(true);
     if (st.data.stats) renderStats(st.data.stats);

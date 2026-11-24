@@ -1,10 +1,12 @@
 {
   "name": "phone-agent-server",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Telefon serverni masofadan boshqarish paneli: REST API, WebSocket va veb panel",
   "type": "module",
   "main": "index.js",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node index.js",
     "setup": "node scripts/setup.js",

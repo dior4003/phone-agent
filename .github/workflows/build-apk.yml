@@ -1,4 +1,4 @@
-name: Build APK
+name: Build APK & Check Server
 
 on:
   workflow_dispatch:
@@ -10,7 +10,21 @@ permissions:
   contents: write   # tegli build uchun GitHub Release yaratish huquqi
 
 jobs:
+  server-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Server bog'liqliklari va testlari
+        working-directory: server
+        run: |
+          npm install --no-audit --no-fund
+          npm test
+
   build:
+    needs: server-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,22 +38,24 @@ jobs:
         with:
           gradle-version: 8.7
 
-      # Versiyani aniqlaymiz:
-      #  - v1.2.3 tegi bilan push bo'lsa  -> versionName = "1.2.3" (haqiqiy release)
-      #  - boshqa har qanday holatda      -> versionName = "0.<build raqami>-dev" (sinov build)
-      - name: Versiyani hisoblash
+      # Yagona manba: server/package.json dagi "version" bilan GitHub tegi mosligini tekshiramiz.
+      - name: Versiya mosligini tekshirish
         id: ver
         run: |
+          PKG_VER=$(node -p "require('./server/package.json').version")
           if [[ "${GITHUB_REF}" == refs/tags/v*.*.* ]]; then
-            NAME="${GITHUB_REF#refs/tags/v}"
+            TAG_VER="${GITHUB_REF#refs/tags/v}"
+            if [[ "$TAG_VER" != "$PKG_VER" ]]; then
+              echo "XATO: Git tegi ($TAG_VER) va server/package.json ($PKG_VER) versiyalari mos emas!"
+              exit 1
+            fi
             IS_RELEASE=true
           else
-            NAME="0.${GITHUB_RUN_NUMBER}-dev"
             IS_RELEASE=false
           fi
-          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "name=$PKG_VER" >> "$GITHUB_OUTPUT"
           echo "is_release=$IS_RELEASE" >> "$GITHUB_OUTPUT"
-          echo "Versiya: $NAME (release: $IS_RELEASE)"
+          echo "Server va APK versiyasi: $PKG_VER (release: $IS_RELEASE)"
 
       - name: Build debug APK
         working-directory: android

@@ -9,6 +9,8 @@ import { Alerts, evaluate } from "./alerts.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
+let PKG_VERSION = "0.0.0";
+try { PKG_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")).version || "0.0.0"; } catch {}
 const STATIC = {
   "/": ["index.html", "text/html; charset=utf-8"],
   "/index.html": ["index.html", "text/html; charset=utf-8"],
@@ -250,7 +252,7 @@ export function createApp(env) {
     const m = req.method;
 
     if (p === "/api/health" && m === "GET") {
-      return json(res, 200, { ok: true, agent: !!agent, totp: !!cfg.totpSecret, uptimeSec: Math.floor(process.uptime()) });
+      return json(res, 200, { ok: true, version: PKG_VERSION, agent: !!agent, totp: !!cfg.totpSecret, uptimeSec: Math.floor(process.uptime()) });
     }
 
     if (p === "/api/login" && m === "POST") {
@@ -279,7 +281,7 @@ export function createApp(env) {
     if (!claimsOf(req)) return json(res, 401, { error: "Avtorizatsiya kerak" });
 
     if (p === "/api/status" && m === "GET") {
-      return json(res, 200, { agent: !!agent, stats: lastStats });
+      return json(res, 200, { agent: !!agent, serverVersion: PKG_VERSION, stats: lastStats });
     }
     if (p === "/api/history" && m === "GET") {
       return json(res, 200, { samples: history });

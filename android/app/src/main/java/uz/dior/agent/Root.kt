@@ -10,11 +10,14 @@ import java.util.concurrent.TimeUnit
 object Root {
     private val USER = Regex("^(u0_a\\d{1,6}|\\d{4,6})$")
 
-    private const val ENV =
+    private fun buildEnv(user: String): String =
         "export PREFIX=/data/data/com.termux/files/usr; " +
         "export HOME=/data/data/com.termux/files/home; " +
         "export TMPDIR=\$PREFIX/tmp; " +
         "export PM2_HOME=\$HOME/.pm2; " +
+        "export USER=$user; " +
+        "export LOGNAME=$user; " +
+        "export SHELL=\$PREFIX/bin/sh; " +
         "export LANG=en_US.UTF-8; " +
         "export TERM=xterm-256color; " +
         "export NO_COLOR=1; " +
@@ -32,8 +35,8 @@ object Root {
      * tarmoqqa chiquvchi buyruqlar "ruxsat yo'q" xatosi bilan to'xtaydi.
      *
      * Yechim: su'ga UID bilan birga kerakli qo'shimcha guruhlarni aniq ko'rsatamiz:
-     * AID_INET=3003 (tarmoq), AID_NET_RAW=3004 (ping va shunga o'xshash). Bu guruh
-     * raqamlari Android'da barcha versiyalarda bir xil va o'zgarmaydi.
+     * AID_INET=3003 (tarmoq), AID_NET_RAW=3004 (ping va shunga o'xshash).
+     * Agar qurilmadagi `su` (masalan KernelSU/APatch) buni qo'llamasa, `su <user>` ga o'tadi.
      */
     private fun suUserSpec(user: String): String {
         val uid = if (user.startsWith("u0_a")) {
@@ -44,28 +47,33 @@ object Root {
         return "$uid:$uid,3003,3004"
     }
 
+    @Volatile private var useSuppGroups: Boolean? = null
+
+    private fun suPrefix(user: String): String {
+        val use = useSuppGroups ?: run {
+            val probe = Shell.cmd("su ${suUserSpec(user)} -c true").exec().isSuccess
+            useSuppGroups = probe
+            probe
+        }
+        return if (use) "su ${suUserSpec(user)}" else "su $user"
+    }
+
     fun run(user: String, cmd: String): Pair<Boolean, String> {
         if (!isValidUser(user)) {
             return false to "Termux foydalanuvchisi noto'g'ri yoki kiritilmagan (masalan: u0_a285)"
         }
-        val inner = (ENV + cmd).replace("'", "'\\''")
-        val r = Shell.cmd("su ${suUserSpec(user)} -c '$inner'").exec()
+        val inner = (buildEnv(user) + cmd).replace("'", "'\\''")
+        val r = Shell.cmd("${suPrefix(user)} -c '$inner'").exec()
         return r.isSuccess to (r.out + r.err).joinToString("\n")
     }
 
-    /**
-     * Uzoq davom etadigan buyruqlar (git clone, npm install, fayl o'qish) uchun: alohida
-     * jarayon, vaqt chegarasi bilan. Asosiy root shell band bo'lmaydi, shuning uchun
-     * statistika to'xtab qolmaydi. [maxOutChars] — odatiy buyruqlar uchun kichik (log
-     * suratini saqlash yetarli), fayl o'qishda (base64) buncha katta beriladi.
-     */
     fun runLong(user: String, cmd: String, timeoutSec: Long, maxOutChars: Int = 200_000): Pair<Boolean, String> {
         if (!isValidUser(user)) {
             return false to "Termux foydalanuvchisi noto'g'ri yoki kiritilmagan (masalan: u0_a285)"
         }
-        val inner = (ENV + cmd).replace("'", "'\\''")
+        val inner = (buildEnv(user) + cmd).replace("'", "'\\''")
         return try {
-            val p = ProcessBuilder("su", "-c", "su ${suUserSpec(user)} -c '$inner'").redirectErrorStream(true).start()
+            val p = ProcessBuilder("su", "-c", "${suPrefix(user)} -c '$inner'").redirectErrorStream(true).start()
             val out = StringBuffer()
             val reader = Thread {
                 try {
@@ -86,18 +94,13 @@ object Root {
         }
     }
 
-    /**
-     * Ma'lumotni (masalan yuklangan fayl baytlarini) jarayonning STDIN orqali uzatadi.
-     * Shunday qilib fayl avval agentning o'z (boshqa UID'dagi) xususiy joyiga yozilmaydi —
-     * UID farqidan kelib chiqadigan "ruxsat yo'q" muammosi butunlay oldini olinadi.
-     */
     fun writeStdin(user: String, cmd: String, data: ByteArray, timeoutSec: Long): Pair<Boolean, String> {
         if (!isValidUser(user)) {
             return false to "Termux foydalanuvchisi noto'g'ri yoki kiritilmagan (masalan: u0_a285)"
         }
-        val inner = (ENV + cmd).replace("'", "'\\''")
+        val inner = (buildEnv(user) + cmd).replace("'", "'\\''")
         return try {
-            val p = ProcessBuilder("su", "-c", "su ${suUserSpec(user)} -c '$inner'").redirectErrorStream(true).start()
+            val p = ProcessBuilder("su", "-c", "${suPrefix(user)} -c '$inner'").redirectErrorStream(true).start()
             val out = StringBuffer()
             val reader = Thread {
                 try {
