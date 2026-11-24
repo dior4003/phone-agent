@@ -23,6 +23,9 @@ object Root {
         "export NO_COLOR=1; " +
         "export PATH=\$HOME/.npm-global/bin:\$HOME/.local/bin:\$PREFIX/bin:\$PATH; " +
         "export LD_LIBRARY_PATH=\$PREFIX/lib; " +
+        "if [ -f \"\$PREFIX/lib/libtermux-exec.so\" ]; then export LD_PRELOAD=\"\$PREFIX/lib/libtermux-exec.so\"; fi; " +
+        "pm2() { node \"\$(command -v pm2)\" \"\$@\"; }; " +
+        "npm() { node \"\$(command -v npm)\" \"\$@\"; }; " +
         "mkdir -p \"\$TMPDIR\" 2>/dev/null; " +
         "cd \"\$HOME\"; "
 

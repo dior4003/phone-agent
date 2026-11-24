@@ -35,7 +35,7 @@ const MAX_FILE_BYTES = 15 * 1024 * 1024; // 15 MB (android/.../Actions.kt dagi l
 // Fayl menejeri uchun yo'l tekshiruvi: "/" bilan boshlanmasin, ".."siz, NUL belgisisiz.
 function validPath(raw) {
   let p = String(raw ?? "").replace(/\\/g, "/").trim();
-  if (p === "") return ".";
+  if (p === "" || p === ".") return ".";
   if (p.startsWith("/") || p.length > 400 || p.includes("\0")) return null;
   for (const s of p.split("/")) if (s === "" || s === "." || s === "..") return null;
   return p;
