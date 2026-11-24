@@ -26,6 +26,7 @@ class Actions(private val ctx: Context) {
         private val NAME = Regex("^[A-Za-z0-9_-]{1,40}$")
         private val DIR = Regex("^[A-Za-z0-9_./-]{1,80}$")
         private val OPS = setOf("start", "stop", "restart")
+        private val PM2_OPS = setOf("start", "stop", "restart", "delete")
 
         // Loyiha yuklash uchun: faqat https:// manzillar, qobiq belgilarisiz (;, |, &, $, `, ', ", bo'sh joy)
         // Birinchi segment (host + ixtiyoriy https://token@host kabi autentifikatsiya) uzunroq
@@ -40,6 +41,8 @@ class Actions(private val ctx: Context) {
     private val user get() = prefs.termuxUser
     private var torchCameraId: String? = null
     @Volatile private var torchOn = false
+
+    private fun shQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
 
     /** Ko'rsatish mumkin bo'lgan loglar (nom -> yo'l). */
     fun logs(): Map<String, String> {
@@ -70,12 +73,19 @@ class Actions(private val ctx: Context) {
     }
 
     private fun service(op: String, target: String): Pair<Boolean, String> {
-        if (op !in OPS) return false to "Noto'g'ri amal"
         if (target.startsWith("pm2:")) {
+            if (op !in PM2_OPS) return false to "Noto'g'ri amal"
             val name = target.removePrefix("pm2:")
             if (!NAME.matches(name)) return false to "Noto'g'ri nom"
-            return Root.run(user, "pm2 $op $name")
+            val qName = shQuote(name)
+            val cmd = if (op == "delete") {
+                "pm2 delete $qName 2>&1 && pm2 save --force >/dev/null 2>&1 || true"
+            } else {
+                "pm2 $op $qName 2>&1 && pm2 save --force >/dev/null 2>&1 || true"
+            }
+            return Root.run(user, cmd)
         }
+        if (op !in OPS) return false to "Noto'g'ri amal"
         val s = SERVICES[target] ?: return false to "Ruxsat etilmagan servis"
         return when (op) {
             "start" -> Root.run(user, s.start)
@@ -92,18 +102,32 @@ class Actions(private val ctx: Context) {
         if (target.startsWith("pm2:")) {
             val name = target.removePrefix("pm2:")
             if (!NAME.matches(name)) return false to "Noto'g'ri nom"
-            return Root.run(user, "pm2 logs $name --lines $lines --nostream")
+            return Root.run(user, "pm2 logs ${shQuote(name)} --lines $lines --nostream --no-color 2>&1")
         }
         val path = logs()[target] ?: return false to "Ruxsat etilmagan log"
         return Root.run(user, "tail -n $lines $path")
     }
 
+    private fun extractPm2Json(out: String): String {
+        val line = out.lines().lastOrNull {
+            val t = it.trim()
+            t == "[]" || t.startsWith("[{")
+        }?.trim()
+        if (!line.isNullOrEmpty()) return line
+        val idxObj = out.indexOf("[{")
+        if (idxObj >= 0) return out.substring(idxObj).trim()
+        if (out.contains("[]")) return "[]"
+        return ""
+    }
+
     private fun pm2list(): Pair<Boolean, String> {
-        val (ok, out) = Root.run(user, "pm2 jlist")
-        val start = out.indexOf('[')
-        if (!ok || start < 0) return false to "pm2 topilmadi yoki ishlamayapti"
+        val (ok, out) = Root.run(user, "command -v pm2 >/dev/null 2>&1 || { echo __NOPM2__; exit 127; }; pm2 jlist --no-color 2>&1")
+        if (out.contains("__NOPM2__")) return false to "Termux'da pm2 o'rnatilmagan (npm install -g pm2)"
+        val jsonStr = extractPm2Json(out)
+        if (!ok && jsonStr.isEmpty()) return false to out.ifBlank { "pm2 topilmadi yoki ishlamayapti" }
+        if (jsonStr.isEmpty()) return true to "[]"
         return try {
-            val src = JSONArray(out.substring(start))
+            val src = JSONArray(jsonStr)
             val dst = JSONArray()
             for (i in 0 until src.length()) {
                 val p = src.getJSONObject(i)
@@ -114,6 +138,7 @@ class Actions(private val ctx: Context) {
                         .put("status", env?.optString("status") ?: "?")
                         .put("mem", p.optJSONObject("monit")?.optLong("memory") ?: 0L)
                         .put("restarts", env?.optInt("restart_time") ?: 0)
+                        .put("cwd", env?.optString("pm_cwd") ?: "")
                 )
             }
             true to dst.toString()
@@ -180,20 +205,19 @@ class Actions(private val ctx: Context) {
     }
 
     /**
-     * Yangi loyihani git orqali yuklab, ishga tushirish.
-     * Erkin buyruq YO'Q: faqat "clone" (https manzildan), "scripts" (package.json dagi
-     * tayyor skriptlar ro'yxatini o'qish) va "run" (shu ro'yxatdan tanlangan skriptni
-     * pm2 orqali ishga tushirish, masalan "npm run dev").
+     * Yangi loyihani git orqali yuklab, ishga tushirish va yangilash.
+     * Erkin buyruq YO'Q: faqat "clone", "install", "scripts", "run", "update", "remove".
      */
     private fun deploy(op: String, target: String, m: JSONObject): Pair<Boolean, String> {
         if (!NAME.matches(target)) return false to "Noto'g'ri papka nomi"
+        val qTarget = shQuote(target)
         return when (op) {
             "clone" -> {
                 val repo = m.optString("repo")
                 if (!REPO_URL.matches(repo)) return false to "Noto'g'ri repo manzili (https://... bilan boshlanishi kerak)"
                 val cmd = "command -v git >/dev/null 2>&1 || { echo NOGIT; exit 127; }; " +
-                    "if [ -e $target ]; then echo EXISTS; exit 3; fi; " +
-                    "GIT_TERMINAL_PROMPT=0 git clone --depth 1 -- '$repo' $target 2>&1"
+                    "if [ -e $qTarget ]; then echo EXISTS; exit 3; fi; " +
+                    "GIT_TERMINAL_PROMPT=0 git clone --depth 1 -- ${shQuote(repo)} $qTarget 2>&1"
                 val (ok, out) = Root.runLong(user, cmd, 600)
                 if (out.trim() == "NOGIT") return false to "Termux'da git o'rnatilmagan. Termux'da bajaring: pkg install git"
                 if (out.trim() == "EXISTS") return false to "\"$target\" papkasi allaqachon bor. Boshqa nom bering yoki avval uni o'chiring"
@@ -203,13 +227,13 @@ class Actions(private val ctx: Context) {
             "install" -> {
                 val (ok, out) = Root.runLong(
                     user,
-                    "test -d $target || { echo 'Papka topilmadi'; exit 9; }; cd $target && npm install --no-audit --no-fund 2>&1",
+                    "test -d $qTarget || { echo 'Papka topilmadi'; exit 9; }; cd $qTarget && npm install --no-audit --no-fund 2>&1",
                     900
                 )
                 if (!ok) false to out.takeLast(2000) else true to "O'rnatildi: $target"
             }
             "scripts" -> {
-                val (ok, out) = Root.run(user, "cat $target/package.json 2>/dev/null")
+                val (ok, out) = Root.run(user, "cat $qTarget/package.json 2>/dev/null")
                 if (!ok || out.isBlank()) return false to "package.json topilmadi (avval \"npm install\" bosilganmi?)"
                 try {
                     val scripts = JSONObject(out).optJSONObject("scripts") ?: JSONObject()
@@ -222,12 +246,52 @@ class Actions(private val ctx: Context) {
                 val script = m.optString("script")
                 if (!SCRIPT_NAME.matches(script)) return false to "Noto'g'ri skript nomi"
                 // Himoya: faqat package.json ichida haqiqatan mavjud skriptni ishga tushiramiz
-                val (okCat, out) = Root.run(user, "cat $target/package.json 2>/dev/null")
+                val (okCat, out) = Root.run(user, "cat $qTarget/package.json 2>/dev/null")
                 val exists = okCat && try { JSONObject(out).optJSONObject("scripts")?.has(script) == true } catch (e: Exception) { false }
                 if (!exists) return false to "Bu skript package.json \"scripts\" ichida topilmadi"
-                Root.run(user, "cd $target && pm2 start npm --name '$target' -- run '$script'")
+                val qScript = shQuote(script)
+                val cmd = "command -v pm2 >/dev/null 2>&1 || { echo 'Termuxda pm2 ornatilmagan (npm install -g pm2)'; exit 127; }; " +
+                    "cd $qTarget && pm2 delete $qTarget >/dev/null 2>&1 || true; " +
+                    "pm2 start npm --name $qTarget -- run $qScript 2>&1 && pm2 save --force >/dev/null 2>&1 || true"
+                val (okRun, runOut) = Root.run(user, cmd)
+                if (!okRun) false to runOut.takeLast(1500) else true to "Ishga tushirildi: $target ($script)"
             }
-            "remove" -> Root.run(user, "pm2 delete '$target' >/dev/null 2>&1; rm -rf -- $target")
+            "update" -> {
+                // Loyiha papkasini aniqlash: avval $HOME/<target>, bo'lmasa pm2 jlist dagi pm_cwd
+                var projDir = target
+                val (_, checkHome) = Root.run(user, "test -d $qTarget/.git && echo __GIT__")
+                if (!checkHome.contains("__GIT__")) {
+                    val (okList, listOut) = Root.run(user, "pm2 jlist --no-color 2>/dev/null")
+                    val jsonStr = extractPm2Json(listOut)
+                    if (okList && jsonStr.isNotEmpty()) {
+                        try {
+                            val arr = JSONArray(jsonStr)
+                            for (i in 0 until arr.length()) {
+                                val p = arr.getJSONObject(i)
+                                if (p.optString("name") == target) {
+                                    val cwd = p.optJSONObject("pm2_env")?.optString("pm_cwd") ?: ""
+                                    if (cwd.isNotEmpty()) projDir = cwd
+                                    break
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+                val qDir = shQuote(projDir)
+                val cmd = "if [ ! -d $qDir/.git ]; then echo __NOGITDIR__; exit 5; fi; " +
+                    "cd $qDir && GIT_TERMINAL_PROMPT=0 git pull --ff-only 2>&1 || exit 6; " +
+                    "if [ -f package.json ]; then npm install --no-audit --no-fund 2>&1 || exit 7; fi; " +
+                    "pm2 restart $qTarget 2>&1 && pm2 save --force >/dev/null 2>&1 || true"
+                val (okUpd, outUpd) = Root.runLong(user, cmd, 600)
+                if (outUpd.contains("__NOGITDIR__")) {
+                    return false to "\"$target\" papkasida git repozitoriy topilmadi"
+                }
+                if (!okUpd) return false to outUpd.takeLast(2000)
+                true to "Yangilandi va qayta ishga tushirildi: $target\n${outUpd.takeLast(1000)}"
+            }
+            "remove" -> {
+                Root.run(user, "pm2 delete $qTarget >/dev/null 2>&1 || true; pm2 save --force >/dev/null 2>&1 || true; rm -rf -- $qTarget")
+            }
             else -> false to "Noto'g'ri amal"
         }
     }
@@ -272,14 +336,19 @@ class Actions(private val ctx: Context) {
      */
     private fun file(op: String, targetRaw: String, m: JSONObject): Pair<Boolean, String> {
         val rel = safeRel(targetRaw) ?: return false to "Noto'g'ri yo'l"
+        val qRel = shQuote(rel)
         return when (op) {
             "list" -> {
-                val cmd = "if [ ! -d '$rel' ]; then echo __NODIR__; exit 4; fi; " +
-                    "cd '$rel' && find . -mindepth 1 -maxdepth 1 -print0 | while IFS= read -r -d '' f; do " +
-                    "n=\"\${f#./}\"; if [ -d \"\$f\" ]; then t=d; else t=f; fi; " +
-                    "sz=\$(stat -c %s \"\$f\" 2>/dev/null || echo 0); " +
+                // POSIX/mksh mos: read -d '' ishlatilmaydi (Android /system/bin/sh da read -d yo'q)
+                val cmd = "if [ ! -d $qRel ]; then echo __NODIR__; exit 4; fi; " +
+                    "cd $qRel || exit 4; " +
+                    "for f in * .[!.]* ..?*; do " +
+                    "[ -e \"\$f\" ] || [ -L \"\$f\" ] || continue; " +
+                    "if [ -d \"\$f\" ]; then t=d; else t=f; fi; " +
+                    "sz=\$(stat -c %s \"\$f\" 2>/dev/null || wc -c < \"\$f\" 2>/dev/null || echo 0); " +
                     "mt=\$(stat -c %Y \"\$f\" 2>/dev/null || echo 0); " +
-                    "printf '%s\\t%s\\t%s\\t%s\\n' \"\$t\" \"\$sz\" \"\$mt\" \"\$n\"; done"
+                    "printf '%s\\t%s\\t%s\\t%s\\n' \"\$t\" \"\$sz\" \"\$mt\" \"\$f\"; " +
+                    "done"
                 val (ok, out) = Root.run(user, cmd)
                 if (out.trim() == "__NODIR__") return false to "Papka topilmadi"
                 if (!ok) return false to out.take(1500)
@@ -300,13 +369,13 @@ class Actions(private val ctx: Context) {
             }
             "read" -> {
                 if (rel == ".") return false to "Fayl tanlanmagan"
-                val (okSz, sz) = Root.run(user, "stat -c %s '$rel' 2>/dev/null || echo -1")
+                val (_, sz) = Root.run(user, "stat -c %s $qRel 2>/dev/null || wc -c < $qRel 2>/dev/null || echo -1")
                 val size = sz.trim().toLongOrNull() ?: -1
                 if (size < 0) return false to "Fayl topilmadi"
                 if (size > MAX_FILE_BYTES) return false to "Fayl juda katta (limit ${MAX_FILE_BYTES / 1024 / 1024} MB)"
                 // base64 ~4/3 marta kattalashtiradi; natija shuncha uzun bo'lishi mumkinligini hisobga olamiz
                 val maxOut = (MAX_FILE_BYTES.toLong() * 4 / 3 + 4096).toInt()
-                val (ok, out) = Root.runLong(user, "base64 -w0 '$rel' 2>/dev/null || base64 '$rel' 2>/dev/null | tr -d '\\n'", 120, maxOut)
+                val (ok, out) = Root.runLong(user, "base64 -w0 $qRel 2>/dev/null || base64 $qRel 2>/dev/null | tr -d '\\n'", 120, maxOut)
                 if (!ok || out.isBlank()) return false to "O'qib bo'lmadi"
                 true to out.trim()
             }
@@ -320,19 +389,20 @@ class Actions(private val ctx: Context) {
                     return false to "Noto'g'ri ma'lumot (base64)"
                 }
                 if (bytes.size > MAX_FILE_BYTES) return false to "Fayl juda katta (limit ${MAX_FILE_BYTES / 1024 / 1024} MB)"
-                val cmd = "mkdir -p -- \"\$(dirname '$rel')\" 2>/dev/null; cat > '$rel' && echo __OK__ || echo __FAIL__"
+                val cmd = "mkdir -p -- \"\$(dirname $qRel)\" 2>/dev/null; cat > $qRel && echo __OK__ || echo __FAIL__"
                 val (ok, out) = Root.writeStdin(user, cmd, bytes, 120)
                 if (!ok || !out.contains("__OK__")) return false to "Yozib bo'lmadi: ${out.take(500)}"
                 true to "Saqlandi: $rel"
             }
-            "mkdir" -> if (rel == ".") false to "Papka nomi kerak" else Root.run(user, "mkdir -p -- '$rel'")
-            "delete" -> if (rel == ".") false to "Bu papkani o'chirib bo'lmaydi" else Root.run(user, "rm -rf -- '$rel'")
+            "mkdir" -> if (rel == ".") false to "Papka nomi kerak" else Root.run(user, "mkdir -p -- $qRel")
+            "delete" -> if (rel == ".") false to "Bu papkani o'chirib bo'lmaydi" else Root.run(user, "rm -rf -- $qRel")
             "unzip" -> {
                 if (rel == ".") return false to "Zip fayl tanlanmagan"
                 val dest = safeRel(m.optString("dest")) ?: return false to "Noto'g'ri manzil papka"
+                val qDest = shQuote(dest)
                 val cmd = "command -v unzip >/dev/null 2>&1 || { echo __NOUNZIP__; exit 127; }; " +
-                    "test -f '$rel' || { echo __NOFILE__; exit 4; }; " +
-                    "mkdir -p -- '$dest' && unzip -o -q '$rel' -d '$dest' 2>&1 && echo __OK__ || echo __FAIL__"
+                    "test -f $qRel || { echo __NOFILE__; exit 4; }; " +
+                    "mkdir -p -- $qDest && unzip -o -q $qRel -d $qDest 2>&1 && echo __OK__ || echo __FAIL__"
                 val (ok, out) = Root.runLong(user, cmd, 300)
                 if (out.contains("__NOUNZIP__")) return false to "Termux'da unzip o'rnatilmagan. Bajaring: pkg install unzip"
                 if (out.contains("__NOFILE__")) return false to "Zip fayl topilmadi"

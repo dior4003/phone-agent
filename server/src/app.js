@@ -20,6 +20,7 @@ const STATIC = {
 const NAME = /^[a-z0-9_-]{1,40}$/i;
 const TARGET = /^(pm2:)?[a-z0-9_-]{1,40}$/i;
 const OPS = new Set(["start", "stop", "restart"]);
+const PM2_OPS = new Set(["start", "stop", "restart", "delete"]);
 const HISTORY_MAX = 720; // 5 soniyalik namuna bilan ~1 soat
 
 // Birinchi segment (host + ixtiyoriy https://token@host autentifikatsiya) uzunroq
@@ -293,7 +294,7 @@ export function createApp(env) {
     }
     if (p === "/api/pm2" && m === "GET") {
       const r = await command(req, { action: "pm2list" });
-      if (!r.body.ok) return json(res, r.status, r.body);
+      if (!r.body.ok) return json(res, r.status === 200 ? 502 : r.status, r.body);
       let apps = [];
       try { apps = JSON.parse(r.body.out); } catch {}
       return json(res, 200, { ok: true, apps });
@@ -306,9 +307,15 @@ export function createApp(env) {
       const r = await command(req, { action: "service", op, target: name });
       return json(res, r.status, r.body);
     }
+    if ((mm = p.match(/^\/api\/pm2\/([^/]+)\/update$/)) && m === "POST") {
+      const name = decodeURIComponent(mm[1]);
+      if (!NAME.test(name)) return json(res, 400, { error: "Noto'g'ri nom" });
+      if (!agent) return json(res, 503, { ok: false, error: "Telefon ulanmagan" });
+      return json(res, 202, { jobId: startJob(req, { action: "deploy", op: "update", target: name }).id });
+    }
     if ((mm = p.match(/^\/api\/pm2\/([^/]+)\/([^/]+)$/)) && m === "POST") {
       const [name, op] = [decodeURIComponent(mm[1]), decodeURIComponent(mm[2])];
-      if (!NAME.test(name) || !OPS.has(op)) return json(res, 400, { error: "Noto'g'ri nom yoki amal" });
+      if (!NAME.test(name) || !PM2_OPS.has(op)) return json(res, 400, { error: "Noto'g'ri nom yoki amal" });
       const r = await command(req, { action: "service", op, target: `pm2:${name}` });
       return json(res, r.status, r.body);
     }

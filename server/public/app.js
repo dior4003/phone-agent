@@ -15,6 +15,8 @@ function el(tag, props = {}, ...kids) {
   return e;
 }
 
+const TABS = new Set(["home", "device", "services", "deploy", "files", "logs"]);
+
 const S = {
   token: sessionStorage.getItem("pa_token"),
   ws: null,
@@ -25,6 +27,8 @@ const S = {
   svcSig: "",
   logSig: "",
   busy: new Set(),
+  tab: "home",
+  fmLoaded: false,
 };
 const HIST_MAX = 360;
 
@@ -93,6 +97,33 @@ function pushHist(sample) {
   }
 }
 
+// ---------- Navigatsiya ----------
+function setTab(tab, pushHash = true) {
+  if (!TABS.has(tab)) tab = "home";
+  S.tab = tab;
+  $("#app").setAttribute("data-active-tab", tab);
+  document.querySelectorAll(".nav-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.nav === tab);
+  });
+  document.querySelectorAll(".tab-panel").forEach((p) => {
+    p.hidden = p.dataset.tab !== tab;
+  });
+  if (pushHash && location.hash !== "#" + tab) {
+    history.replaceState(null, "", "#" + tab);
+  }
+  if (tab === "files" && S.agent && !S.fmLoaded) fmLoad(fmPath);
+  if (tab === "services" && S.agent) loadPm2();
+  if (tab === "logs") loadAudit();
+}
+
+document.querySelectorAll(".nav-btn").forEach((b) => {
+  b.addEventListener("click", () => setTab(b.dataset.nav));
+});
+window.addEventListener("hashchange", () => {
+  const h = location.hash.slice(1);
+  if (TABS.has(h)) setTab(h, false);
+});
+
 // ---------- Ko'rsatish ----------
 function setAgent(on) {
   S.agent = on;
@@ -105,9 +136,12 @@ function setAgent(on) {
   document.querySelectorAll("#dash input, #dash select").forEach((i) => { i.disabled = !on; });
   if (!on) {
     S.stats = null;
+    S.fmLoaded = false;
     $("#deployScripts").hidden = true;
     $("#deployScripts").replaceChildren();
     deployStatus("");
+  } else if (S.tab === "files" && !S.fmLoaded) {
+    fmLoad(fmPath);
   }
 }
 
@@ -150,18 +184,35 @@ function renderStats(s) {
   renderLogSources(s.logs || []);
 }
 
-const OP_LABEL = { start: "Ishga tushirish", stop: "To'xtatish", restart: "Qayta yoqish" };
-const OP_DONE = { start: "ishga tushirildi", stop: "to'xtatildi", restart: "qayta ishga tushirildi" };
+const OP_LABEL = { start: "Ishga tushirish", stop: "To'xtatish", restart: "Qayta yoqish", delete: "O'chirish" };
+const OP_DONE = { start: "ishga tushirildi", stop: "to'xtatildi", restart: "qayta ishga tushirildi", delete: "o'chirildi" };
 
 function opButtons(kind, name) {
-  return el("div", { class: "acts" },
-    ["start", "stop", "restart"].map((op) => {
-      const key = `${kind}:${name}:${op}`;
-      return el("button", {
-        class: op === "stop" ? "danger" : "", "data-key": key, disabled: !S.agent || S.busy.has(key),
-        onclick: (ev) => serviceAction(kind, name, op, ev.currentTarget),
-      }, OP_LABEL[op]);
-    }));
+  const ops = kind === "pm2" ? ["start", "stop", "restart"] : ["start", "stop", "restart"];
+  const btns = ops.map((op) => {
+    const key = `${kind}:${name}:${op}`;
+    return el("button", {
+      class: op === "stop" ? "danger" : "", "data-key": key, disabled: !S.agent || S.busy.has(key),
+      onclick: (ev) => serviceAction(kind, name, op, ev.currentTarget),
+    }, OP_LABEL[op]);
+  });
+  if (kind === "pm2") {
+    btns.push(el("button", {
+      class: "ghost", disabled: !S.agent,
+      onclick: () => openPm2Logs(name),
+    }, "Loglar"));
+    const updKey = `pm2:${name}:update`;
+    btns.push(el("button", {
+      class: "ghost", "data-key": updKey, disabled: !S.agent || S.busy.has(updKey),
+      onclick: (ev) => updatePm2App(name, ev.currentTarget),
+    }, "Git Update"));
+    const delKey = `pm2:${name}:delete`;
+    btns.push(el("button", {
+      class: "danger", "data-key": delKey, disabled: !S.agent || S.busy.has(delKey),
+      onclick: (ev) => serviceAction("pm2", name, "delete", ev.currentTarget),
+    }, "O'chirish"));
+  }
+  return el("div", { class: "acts" }, btns);
 }
 
 function renderServices(map) {
@@ -208,12 +259,57 @@ function renderLogSources(base, extra = []) {
   if (all.includes(keep)) sel.value = keep;
 }
 
+function openPm2Logs(name) {
+  const target = "pm2:" + name;
+  const sel = $("#logSel");
+  if (![...sel.options].some((o) => o.value === target)) {
+    sel.append(el("option", { value: target }, "pm2: " + name));
+  }
+  sel.value = target;
+  setTab("logs");
+  loadLogs();
+}
+
+function setPm2Status(text, bad = false) {
+  const p = $("#pm2Status");
+  p.textContent = text;
+  p.hidden = !text;
+  p.classList.toggle("err", bad);
+}
+
+async function updatePm2App(name, btn) {
+  const ok = await confirmDialog(`"${name}" loyihasi git'dan yangilanib (git pull + npm install) qayta ishga tushirilsinmi?`, "Yangilash");
+  if (!ok) return;
+  const key = `pm2:${name}:update`;
+  S.busy.add(key);
+  btn.disabled = true;
+  btn.textContent = "Yangilanmoqda…";
+  setPm2Status(`"${name}" git'dan yangilanmoqda…`);
+  const r = await runJob(`/api/pm2/${encodeURIComponent(name)}/update`, {}, (s) => {
+    setPm2Status(`"${name}" yangilanmoqda… ${s} s`);
+  });
+  S.busy.delete(key);
+  btn.textContent = "Git Update";
+  btn.disabled = !S.agent;
+  if (r.ok && r.data.ok) {
+    setPm2Status("");
+    toast(`"${name}" yangilandi va qayta ishga tushirildi`);
+  } else {
+    const msg = r.data.error || r.data.out || "Yangilashda xato";
+    setPm2Status(msg, true);
+    toast(`"${name}": yangilashda xato`, true);
+  }
+  setTimeout(loadPm2, 1200);
+  loadAudit();
+}
+
 // ---------- Amallar ----------
 async function serviceAction(kind, name, op, btn) {
   const key = `${kind}:${name}:${op}`;
   const label = kind === "pm2" ? `pm2 "${name}"` : name;
   if (op !== "start") {
-    const ok = await confirmDialog(`${label}: ${op === "stop" ? "to'xtatilsinmi" : "qayta ishga tushirilsinmi"}?`, OP_LABEL[op]);
+    const q = op === "delete" ? "pm2 ro'yxatidan o'chirilsinmi" : op === "stop" ? "to'xtatilsinmi" : "qayta ishga tushirilsinmi";
+    const ok = await confirmDialog(`${label}: ${q}?`, OP_LABEL[op]);
     if (!ok) return;
   }
   S.busy.add(key);
@@ -239,8 +335,10 @@ async function refreshStatus() {
 async function loadPm2() {
   if (!S.agent) return;
   const r = await api("/api/pm2");
-  if (r.ok) renderPm2(r.data.apps || []);
-  else {
+  if (r.ok && r.data.ok) {
+    setPm2Status("");
+    renderPm2(r.data.apps || []);
+  } else {
     const list = $("#pm2");
     list.replaceChildren(el("li", { class: "empty" }, r.data.error || r.data.out || "pm2 ma'lumotini olib bo'lmadi"));
   }
@@ -314,13 +412,15 @@ function logout() {
   S.token = null;
   const ws = S.ws; S.ws = null;
   if (ws) try { ws.close(); } catch {}
-  S.svcSig = ""; S.logSig = "";
+  S.svcSig = ""; S.logSig = ""; S.fmLoaded = false;
   show("login");
   initLogin();
 }
 
 async function start() {
   show("app");
+  const initialTab = TABS.has(location.hash.slice(1)) ? location.hash.slice(1) : "home";
+  setTab(initialTab, false);
   setAgent(false);
   const h = await api("/api/history");
   if (h.ok) for (const x of h.data.samples || []) pushHist(x);
@@ -445,6 +545,7 @@ function fmRenderCrumbs(path) {
 
 async function fmLoad(path) {
   fmPath = path;
+  S.fmLoaded = true;
   $("#fmList").replaceChildren(el("li", { class: "empty" }, "Yuklanmoqda…"));
   $("#fmStatus").textContent = "\u00a0";
   const r = await api("/api/files?path=" + encodeURIComponent(path));
@@ -468,8 +569,6 @@ async function fmLoad(path) {
     acts.append(el("button", { class: "danger", onclick: () => fmDelete(path, e.name, isDir) }, "O'chirish"));
     $("#fmList").append(el("li", {}, nameSpan, metaSpan, acts));
   }
-  // "O'rnatish va ishga tushirish" faqat home ostidagi bitta bosqichli papka uchun ko'rinadi
-  // (deploy API shunday papkalar bilan ishlaydi — fayl menejerining ichkariroq papkalari uchun emas).
   const canBuild = path !== "." && !path.includes("/");
   $("#fmBuild").hidden = !canBuild;
   $("#fmBuild").dataset.dir = canBuild ? path : "";
@@ -553,8 +652,6 @@ $("#fmUp").addEventListener("click", () => {
   fmLoad(idx === -1 ? "." : fmPath.slice(0, idx));
 });
 $("#fmRefresh").addEventListener("click", () => fmLoad(fmPath));
-$("#fmOpen").addEventListener("click", () => { $("#fmModal").hidden = false; fmLoad("."); });
-$("#fmClose").addEventListener("click", () => { $("#fmModal").hidden = true; });
 
 $("#fmBuild").addEventListener("click", async () => {
   const dir = $("#fmBuild").dataset.dir;
@@ -572,17 +669,21 @@ $("#fmBuild").addEventListener("click", async () => {
   if (!names.includes(choice)) { toast("Bu skript ro'yxatda yo'q", true); return; }
 
   const r2 = await api(`/api/deploy/${encodeURIComponent(dir)}/run`, { method: "POST", body: { script: choice } });
-  if (r2.ok && r2.data.ok) { toast(`"${dir}" (${choice}) pm2 orqali ishga tushirildi`); $("#fmStatus").textContent = "Ishga tushirildi."; }
-  else toast(r2.data.error || r2.data.out || "Xato", true);
+  if (r2.ok && r2.data.ok) {
+    toast(`"${dir}" (${choice}) pm2 orqali ishga tushirildi`);
+    $("#fmStatus").textContent = "Ishga tushirildi.";
+    setTimeout(loadPm2, 1200);
+  } else {
+    toast(r2.data.error || r2.data.out || "Xato", true);
+  }
 });
 
 // ---------- Yangi loyiha yuklash ----------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Uzoq davom etadigan amal (git clone, npm install): server ishni fonda bajaradi, biz natijani so'raymiz.
 async function runJob(path, body, onTick) {
   const r = await api(path, { method: "POST", body });
-  if (!r.ok) return r; // tekshiruv xatosi yoki 401/503
+  if (!r.ok) return r;
   const id = r.data.jobId;
   const t0 = Date.now();
   for (;;) {
@@ -594,14 +695,13 @@ async function runJob(path, body, onTick) {
   }
 }
 
-// Git xatosini tushunarli maslahatga aylantiradi
 function gitHint(out) {
   const t = String(out || "");
   if (/NOGIT|git: .*(not found|inaccessible)|git: command not found/i.test(t)) return "Termux'da git o'rnatilmagan. Termux'da bajaring: pkg install git";
   if (/could not read Username|Authentication failed|terminal prompts disabled|Repository not found|returned error: 40[134]/i.test(t))
     return "Repo private yoki manzil noto'g'ri. Private repo uchun manzilga token qo'shing: https://FOYDALANUVCHI:TOKEN@github.com/FOYDALANUVCHI/REPO.git";
   if (/Could not resolve host|unable to access|Failed to connect|Network is unreachable|SSL|certificate/i.test(t))
-    return "Git internetga chiqa olmayapti. Termux'ning o'zida `git ls-remote <manzil>` ishlaydimi, tekshiring. Termux'da ishlab, bu yerda ishlamasa, root orqali o'tganda tarmoq ruxsati yo'q.";
+    return "Git internetga chiqa olmayapti. Termux'ning o'zida `git ls-remote <manzil>` ishlaydimi, tekshiring.";
   return "";
 }
 
@@ -646,24 +746,25 @@ async function runDeployScript(dir, script, btn) {
   const r = await api(`/api/deploy/${encodeURIComponent(dir)}/run`, { method: "POST", body: { script } });
   btn.disabled = false;
   btn.textContent = "Ishga tushirish";
-  if (r.ok && r.data.ok) toast(`"${dir}" (${script}) pm2 orqali ishga tushirildi`);
-  else toast(r.data.error || r.data.out || "Xato", true);
-  setTimeout(loadPm2, 1200);
+  if (r.ok && r.data.ok) {
+    toast(`"${dir}" (${script}) pm2 orqali ishga tushirildi`);
+    setTimeout(loadPm2, 1200);
+  } else {
+    toast(r.data.error || r.data.out || "Xato", true);
+  }
   loadAudit();
 }
 
-// Repo manzilidagi private (shaxsiy) tokenni https://TOKEN@host/... ko'rinishida biriktiradi.
-// Agar foydalanuvchi manzilga allaqachon o'zi "user:token@" qo'shgan bo'lsa, ustiga yozmaydi.
 function withToken(repo, token) {
   if (!token) return repo;
-  if (/^https:\/\/[^/]*@/.test(repo)) return repo; // allaqachon autentifikatsiya bor
+  if (/^https:\/\/[^/]*@/.test(repo)) return repo;
   return repo.replace(/^https:\/\//, `https://${encodeURIComponent(token)}@`);
 }
 
 $("#deployGo").addEventListener("click", async () => {
   const repo = withToken($("#deployRepo").value.trim(), $("#deployToken").value.trim());
   const dir = $("#deployDir").value.trim();
-  $("#deployToken").value = ""; // ishlatilgach darhol tozalaymiz
+  $("#deployToken").value = "";
   if (!repo || !dir) return deployStatus("Repo manzili va papka nomini kiriting.", true);
   const btn = $("#deployGo");
   btn.disabled = true;

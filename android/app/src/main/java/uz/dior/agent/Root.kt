@@ -13,8 +13,15 @@ object Root {
     private const val ENV =
         "export PREFIX=/data/data/com.termux/files/usr; " +
         "export HOME=/data/data/com.termux/files/home; " +
-        "export PATH=\$PREFIX/bin:\$PATH; " +
-        "export LD_LIBRARY_PATH=\$PREFIX/lib; cd \$HOME; "
+        "export TMPDIR=\$PREFIX/tmp; " +
+        "export PM2_HOME=\$HOME/.pm2; " +
+        "export LANG=en_US.UTF-8; " +
+        "export TERM=xterm-256color; " +
+        "export NO_COLOR=1; " +
+        "export PATH=\$HOME/.npm-global/bin:\$HOME/.local/bin:\$PREFIX/bin:\$PATH; " +
+        "export LD_LIBRARY_PATH=\$PREFIX/lib; " +
+        "mkdir -p \"\$TMPDIR\" 2>/dev/null; " +
+        "cd \"\$HOME\"; "
 
     fun isValidUser(user: String) = USER.matches(user)
 

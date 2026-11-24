@@ -2,7 +2,7 @@
 <html lang="uz">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>Telefon server paneli</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -35,6 +35,33 @@
     </div>
   </header>
 
+  <nav class="navbar" aria-label="Asosiy navigatsiya">
+    <button type="button" class="nav-btn active" data-nav="home">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <span>Asosiy</span>
+    </button>
+    <button type="button" class="nav-btn" data-nav="device">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M11 18h2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <span>Qurilma</span>
+    </button>
+    <button type="button" class="nav-btn" data-nav="services">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="3" y="14" width="18" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="7" cy="7" r="1" fill="currentColor"/><circle cx="7" cy="17" r="1" fill="currentColor"/></svg>
+      <span>PM2</span>
+    </button>
+    <button type="button" class="nav-btn" data-nav="deploy">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Yuklash</span>
+    </button>
+    <button type="button" class="nav-btn" data-nav="files">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <span>Fayllar</span>
+    </button>
+    <button type="button" class="nav-btn" data-nav="logs">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <span>Loglar</span>
+    </button>
+  </nav>
+
   <div id="offline" class="banner" hidden>
     Telefon hozir aloqada emas. Telefonda Phone Agent ilovasi yoqilganini, internet borligini va server manzili to'g'riligini tekshiring.
   </div>
@@ -59,155 +86,171 @@
     </aside>
 
     <div id="dash" class="dash">
-      <section aria-labelledby="h-metrics">
-        <h2 id="h-metrics">Resurslar</h2>
-        <div class="tiles">
-          <div class="tile">
-            <div class="tile-head"><span>RAM</span><b id="ramVal">–</b></div>
-            <svg id="ramSpark" class="spark" viewBox="0 0 160 40" preserveAspectRatio="none" aria-hidden="true"></svg>
-            <small id="ramPct" class="muted">&nbsp;</small>
+      <!-- 1. ASOSIY -->
+      <div class="tab-panel" data-tab="home">
+        <section aria-labelledby="h-metrics">
+          <h2 id="h-metrics">Resurslar</h2>
+          <div class="tiles">
+            <div class="tile">
+              <div class="tile-head"><span>RAM</span><b id="ramVal">–</b></div>
+              <svg id="ramSpark" class="spark" viewBox="0 0 160 40" preserveAspectRatio="none" aria-hidden="true"></svg>
+              <small id="ramPct" class="muted">&nbsp;</small>
+            </div>
+            <div class="tile">
+              <div class="tile-head"><span>Yuklama</span><b id="loadVal">–</b></div>
+              <svg id="loadSpark" class="spark" viewBox="0 0 160 40" preserveAspectRatio="none" aria-hidden="true"></svg>
+              <small class="muted">oxirgi 1 daqiqa o'rtachasi</small>
+            </div>
+            <div class="tile">
+              <div class="tile-head"><span>Harorat</span><b id="tempVal">–</b></div>
+              <svg id="tempSpark" class="spark" viewBox="0 0 160 40" preserveAspectRatio="none" aria-hidden="true"></svg>
+              <small class="muted">batareya sensori</small>
+            </div>
+            <div class="tile">
+              <div class="tile-head"><span>Xotira</span><b id="diskVal">–</b></div>
+              <div class="meter" role="presentation"><i id="diskBar"></i></div>
+              <small id="diskFree" class="muted">&nbsp;</small>
+            </div>
           </div>
-          <div class="tile">
-            <div class="tile-head"><span>Yuklama</span><b id="loadVal">–</b></div>
-            <svg id="loadSpark" class="spark" viewBox="0 0 160 40" preserveAspectRatio="none" aria-hidden="true"></svg>
-            <small class="muted">oxirgi 1 daqiqa o'rtachasi</small>
-          </div>
-          <div class="tile">
-            <div class="tile-head"><span>Harorat</span><b id="tempVal">–</b></div>
-            <svg id="tempSpark" class="spark" viewBox="0 0 160 40" preserveAspectRatio="none" aria-hidden="true"></svg>
-            <small class="muted">batareya sensori</small>
-          </div>
-          <div class="tile">
-            <div class="tile-head"><span>Xotira</span><b id="diskVal">–</b></div>
-            <div class="meter" role="presentation"><i id="diskBar"></i></div>
-            <small id="diskFree" class="muted">&nbsp;</small>
-          </div>
-        </div>
-      </section>
-
-      <section aria-labelledby="h-svc">
-        <h2 id="h-svc">Servislar</h2>
-        <ul id="svcs" class="rows"><li class="empty">Telefon ulangach servislar shu yerda chiqadi.</li></ul>
-      </section>
-
-      <section aria-labelledby="h-net">
-        <h2 id="h-net">Tarmoq</h2>
-        <ul class="rows">
-          <li>
-            <span class="name">Wi-Fi</span>
-            <span class="meta" id="netWifiState">–</span>
-            <label class="switch grow-end"><input type="checkbox" id="netWifi"><span class="slider"></span></label>
-          </li>
-          <li>
-            <span class="name">Bluetooth</span>
-            <span class="meta" id="netBtState">–</span>
-            <label class="switch grow-end"><input type="checkbox" id="netBt"><span class="slider"></span></label>
-          </li>
-          <li>
-            <span class="name">Mobil internet</span>
-            <span class="meta" id="netDataState">–</span>
-            <label class="switch grow-end"><input type="checkbox" id="netData"><span class="slider"></span></label>
-          </li>
-        </ul>
-      </section>
-
-      <section aria-labelledby="h-find">
-        <h2 id="h-find">Telefonni topish</h2>
-        <p class="muted">Jim yoki tebranish rejimida bo'lsa ham baland ovoz chaladi (2 daqiqadan keyin o'zi to'xtaydi).</p>
-        <div class="row-controls">
-          <button id="findRing" class="primary">Ovoz chalish</button>
-          <button id="findStop" class="ghost">To'xtatish</button>
-        </div>
-      </section>
-
-      <section aria-labelledby="h-flash">
-        <h2 id="h-flash">Chaqmoq</h2>
-        <div class="row-controls">
-          <button id="flashOn" class="primary">Yoqish</button>
-          <button id="flashOff" class="ghost">O'chirish</button>
-        </div>
-      </section>
-
-      <section aria-labelledby="h-bright">
-        <h2 id="h-bright">Ekran yorqinligi</h2>
-        <div class="row-controls bright-row">
-          <input type="range" id="brightRange" min="0" max="255" step="1" value="128">
-          <b id="brightVal">–</b>
-          <button id="brightSet">O'rnatish</button>
-        </div>
-      </section>
-
-      <section aria-labelledby="h-deploy">
-        <h2 id="h-deploy">Yangi loyiha yuklash</h2>
-        <p class="muted">Git repo manzilidan yuklab, bog'liqliklarni o'rnatib, package.json dagi tayyor skriptlardan birini (masalan "dev" yoki "start") tanlab ishga tushirasiz.</p>
-        <div class="deploy-form">
-          <label class="sr" for="deployRepo">Repo manzili</label>
-          <input id="deployRepo" placeholder="https://github.com/foydalanuvchi/loyiha.git">
-          <label class="sr" for="deployDir">Papka nomi</label>
-          <input id="deployDir" placeholder="papka-nomi">
-          <label class="sr" for="deployToken">Shaxsiy token (private repo uchun, ixtiyoriy)</label>
-          <input id="deployToken" type="password" placeholder="Shaxsiy token (private repo uchun, ixtiyoriy)">
-          <button id="deployGo" class="primary">Yuklab olish</button>
-        </div>
-        <p class="muted">Private (maxfiy) repo uchun: GitHub'da Settings → Developer settings → Personal access tokens dan token yarating va shu yerga kiriting. Token faqat shu so'rov uchun ishlatiladi, serverda alohida saqlanmaydi.</p>
-        <p id="deployStatus" class="muted">&nbsp;</p>
-        <ul id="deployScripts" class="rows" hidden></ul>
-      </section>
-
-      <section aria-labelledby="h-pm2">
-        <div class="h-row"><h2 id="h-pm2">pm2 ilovalari</h2><button id="pm2refresh" class="ghost">Yangilash</button></div>
-        <ul id="pm2" class="rows"><li class="empty">pm2 ma'lumoti hali yuklanmagan.</li></ul>
-      </section>
-
-      <section aria-labelledby="h-logs">
-        <h2 id="h-logs">Loglar</h2>
-        <div class="row-controls">
-          <label class="sr" for="logSel">Log manbai</label>
-          <select id="logSel"></select>
-          <label class="sr" for="logLines">Qatorlar soni</label>
-          <select id="logLines"><option>50</option><option selected>100</option><option>300</option><option>500</option></select>
-          <button id="logBtn">Logni yuklash</button>
-        </div>
-        <pre id="logOut" tabindex="0">Log manbasini tanlab, "Logni yuklash"ni bosing.</pre>
-      </section>
-
-      <section aria-labelledby="h-audit">
-        <div class="h-row"><h2 id="h-audit">Amallar jurnali</h2><button id="auditRefresh" class="ghost">Yangilash</button></div>
-        <ul id="audit" class="rows compact"></ul>
-      </section>
-
-      <section aria-labelledby="h-fm">
-        <h2 id="h-fm">Fayl menejeri</h2>
-        <p class="muted">Termux foydalanuvchisi papkalari bilan cheklangan (tizim fayllariga yo'l yopiq). Zip yuklash, yoyish, bog'liqliklarni o'rnatish va ishga tushirish shu yerda.</p>
-        <button id="fmOpen" class="primary">Fayl menejerini ochish</button>
-      </section>
-
-      <div id="fmModal" class="fm-modal" hidden>
-        <div class="fm-box">
-          <div class="fm-head">
-            <div id="fmCrumbs" class="fm-crumbs">🏠</div>
-            <button id="fmClose" class="ghost">Yopish</button>
-          </div>
-          <div class="fm-toolbar">
-            <button id="fmUp" class="ghost">⬆ Yuqoriga</button>
-            <button id="fmRefresh" class="ghost">⟳ Yangilash</button>
-            <button id="fmMkdir" class="ghost">+ Papka</button>
-            <label class="fm-upload-btn">
-              ⇧ Yuklash (zip ham bo'ladi)
-              <input id="fmUpload" type="file" multiple hidden>
-            </label>
-            <button id="fmBuild" class="primary" hidden>▶ O'rnatish va ishga tushirish</button>
-          </div>
-          <ul id="fmList" class="rows fm-list"><li class="empty">Yuklanmoqda…</li></ul>
-          <p id="fmStatus" class="muted">&nbsp;</p>
-        </div>
+        </section>
       </div>
 
-      <section aria-labelledby="h-danger" class="danger-zone">
-        <h2 id="h-danger">Telefonni boshqarish</h2>
-        <p class="muted">Qayta yoqilganda barcha servislar vaqtincha to'xtaydi. Avtostart sozlangan bo'lsa, ular o'zi ko'tariladi.</p>
-        <button id="reboot" class="danger">Telefonni qayta yoqish</button>
-      </section>
+      <!-- 2. QURILMA -->
+      <div class="tab-panel" data-tab="device" hidden>
+        <section aria-labelledby="h-net">
+          <h2 id="h-net">Tarmoq</h2>
+          <ul class="rows">
+            <li>
+              <span class="name">Wi-Fi</span>
+              <span class="meta" id="netWifiState">–</span>
+              <label class="switch grow-end"><input type="checkbox" id="netWifi"><span class="slider"></span></label>
+            </li>
+            <li>
+              <span class="name">Bluetooth</span>
+              <span class="meta" id="netBtState">–</span>
+              <label class="switch grow-end"><input type="checkbox" id="netBt"><span class="slider"></span></label>
+            </li>
+            <li>
+              <span class="name">Mobil internet</span>
+              <span class="meta" id="netDataState">–</span>
+              <label class="switch grow-end"><input type="checkbox" id="netData"><span class="slider"></span></label>
+            </li>
+          </ul>
+        </section>
+
+        <section aria-labelledby="h-bright">
+          <h2 id="h-bright">Ekran yorqinligi</h2>
+          <div class="row-controls bright-row">
+            <input type="range" id="brightRange" min="0" max="255" step="1" value="128">
+            <b id="brightVal">–</b>
+            <button id="brightSet">O'rnatish</button>
+          </div>
+        </section>
+
+        <section aria-labelledby="h-flash">
+          <h2 id="h-flash">Chaqmoq</h2>
+          <div class="row-controls">
+            <button id="flashOn" class="primary">Yoqish</button>
+            <button id="flashOff" class="ghost">O'chirish</button>
+          </div>
+        </section>
+
+        <section aria-labelledby="h-find">
+          <h2 id="h-find">Telefonni topish</h2>
+          <p class="muted">Jim yoki tebranish rejimida bo'lsa ham baland ovoz chaladi (2 daqiqadan keyin o'zi to'xtaydi).</p>
+          <div class="row-controls">
+            <button id="findRing" class="primary">Ovoz chalish</button>
+            <button id="findStop" class="ghost">To'xtatish</button>
+          </div>
+        </section>
+
+        <section aria-labelledby="h-danger" class="danger-zone">
+          <h2 id="h-danger">Telefonni boshqarish</h2>
+          <p class="muted">Qayta yoqilganda barcha servislar vaqtincha to'xtaydi. Avtostart sozlangan bo'lsa, ular o'zi ko'tariladi.</p>
+          <button id="reboot" class="danger">Telefonni qayta yoqish</button>
+        </section>
+      </div>
+
+      <!-- 3. SERVISLAR & PM2 -->
+      <div class="tab-panel" data-tab="services" hidden>
+        <section aria-labelledby="h-svc">
+          <h2 id="h-svc">Tizim servislari</h2>
+          <ul id="svcs" class="rows"><li class="empty">Telefon ulangach servislar shu yerda chiqadi.</li></ul>
+        </section>
+
+        <section aria-labelledby="h-pm2">
+          <div class="h-row"><h2 id="h-pm2">pm2 ilovalari</h2><button id="pm2refresh" class="ghost">Yangilash</button></div>
+          <p id="pm2Status" class="muted" hidden></p>
+          <ul id="pm2" class="rows"><li class="empty">pm2 ma'lumoti hali yuklanmagan.</li></ul>
+        </section>
+      </div>
+
+      <!-- 4. YANGI LOYIHA YUKLASH -->
+      <div class="tab-panel" data-tab="deploy" hidden>
+        <section aria-labelledby="h-deploy">
+          <h2 id="h-deploy">Yangi loyiha yuklash</h2>
+          <p class="muted">Git repo manzilidan yuklab, bog'liqliklarni o'rnatib, package.json dagi tayyor skriptlardan birini (masalan "dev" yoki "start") tanlab pm2 ga qo'shasiz.</p>
+          <div class="deploy-form">
+            <label class="sr" for="deployRepo">Repo manzili</label>
+            <input id="deployRepo" placeholder="https://github.com/foydalanuvchi/loyiha.git">
+            <label class="sr" for="deployDir">Papka nomi</label>
+            <input id="deployDir" placeholder="papka-nomi">
+            <label class="sr" for="deployToken">Shaxsiy token (private repo uchun, ixtiyoriy)</label>
+            <input id="deployToken" type="password" placeholder="Shaxsiy token (ixtiyoriy)">
+            <button id="deployGo" class="primary">Yuklab olish</button>
+          </div>
+          <p class="muted">Private (maxfiy) repo uchun: GitHub'da Settings → Developer settings → Personal access tokens dan token yarating va shu yerga kiriting. Token faqat shu so'rov uchun ishlatiladi, serverda alohida saqlanmaydi.</p>
+          <p id="deployStatus" class="muted">&nbsp;</p>
+          <ul id="deployScripts" class="rows" hidden></ul>
+        </section>
+      </div>
+
+      <!-- 5. FAYL MENEJERI -->
+      <div class="tab-panel" data-tab="files" hidden>
+        <section aria-labelledby="h-fm" class="fm-section">
+          <div class="h-row">
+            <h2 id="h-fm">Fayl menejeri</h2>
+            <span class="muted">Termux uy papkasi</span>
+          </div>
+          <div class="fm-card">
+            <div class="fm-head">
+              <div id="fmCrumbs" class="fm-crumbs">🏠</div>
+            </div>
+            <div class="fm-toolbar">
+              <button id="fmUp" class="ghost">⬆ Yuqoriga</button>
+              <button id="fmRefresh" class="ghost">⟳ Yangilash</button>
+              <button id="fmMkdir" class="ghost">+ Papka</button>
+              <label class="fm-upload-btn">
+                ⇧ Yuklash (zip ham bo'ladi)
+                <input id="fmUpload" type="file" multiple hidden>
+              </label>
+              <button id="fmBuild" class="primary" hidden>▶ O'rnatish va ishga tushirish</button>
+            </div>
+            <ul id="fmList" class="rows fm-list"><li class="empty">Yuklanmoqda…</li></ul>
+            <p id="fmStatus" class="muted fm-status">&nbsp;</p>
+          </div>
+        </section>
+      </div>
+
+      <!-- 6. LOGLAR & JURNAL -->
+      <div class="tab-panel" data-tab="logs" hidden>
+        <section aria-labelledby="h-logs">
+          <h2 id="h-logs">Loglar</h2>
+          <div class="row-controls">
+            <label class="sr" for="logSel">Log manbai</label>
+            <select id="logSel"></select>
+            <label class="sr" for="logLines">Qatorlar soni</label>
+            <select id="logLines"><option>50</option><option selected>100</option><option>300</option><option>500</option></select>
+            <button id="logBtn" class="primary">Logni yuklash</button>
+          </div>
+          <pre id="logOut" tabindex="0">Log manbasini tanlab, "Logni yuklash"ni bosing.</pre>
+        </section>
+
+        <section aria-labelledby="h-audit">
+          <div class="h-row"><h2 id="h-audit">Amallar jurnali</h2><button id="auditRefresh" class="ghost">Yangilash</button></div>
+          <ul id="audit" class="rows compact"></ul>
+        </section>
+      </div>
     </div>
   </div>
 </div>
