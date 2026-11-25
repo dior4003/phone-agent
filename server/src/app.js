@@ -55,10 +55,12 @@ function parseConfig(env) {
     jwtSecret: need("JWT_SECRET", 16),
     totpSecret: env.TOTP_SECRET || "",
     trustProxy: String(env.TRUST_PROXY || "").toLowerCase() === "true",
+    disableShell: String(env.DISABLE_SHELL || "").toLowerCase() === "true",
     sessionSec: Math.max(1, Number(env.SESSION_HOURS || 12)) * 3600,
     cmdTimeout: Number(env.CMD_TIMEOUT_MS || 30000),
     deployTimeout: Number(env.DEPLOY_TIMEOUT_MS || 15 * 60 * 1000),
     auditFile: env.AUDIT_FILE || path.join(process.cwd(), "audit.log"),
+    historyFile: env.HISTORY_FILE || path.join(path.dirname(env.AUDIT_FILE || path.join(process.cwd(), "audit.log")), "history.json"),
     loginMax: Number(env.LOGIN_MAX_ATTEMPTS || 5),
     thresholds: {
       tempC: Number(env.ALERT_TEMP_C || 45),
@@ -104,6 +106,15 @@ export function createApp(env) {
   let lastStats = null;
   let lastTotpCounter = 0;
   const history = [];
+  try {
+    const saved = JSON.parse(fs.readFileSync(cfg.historyFile, "utf8"));
+    if (Array.isArray(saved)) history.push(...saved.slice(-HISTORY_MAX));
+  } catch {}
+  const saveHistory = () => {
+    try { fs.writeFile(cfg.historyFile, JSON.stringify(history), () => {}); } catch {}
+  };
+  const histTimer = setInterval(saveHistory, 60_000);
+  histTimer.unref?.();
   const pending = new Map(); // id -> { resolve, timer }
   const panels = new Set();
   let offlineTimer = null;
@@ -430,37 +441,53 @@ export function createApp(env) {
       return json(res, r.status, r.body);
     }
 
-    // ---------- Fayl menejeri (Termux foydalanuvchisi papkalari bilan cheklangan) ----------
+    // ---------- Fayl menejeri (Termux uy papkasi va Telefon xotirasi /sdcard) ----------
+    const fRoot = (v) => (v === "sdcard" ? "sdcard" : "home");
     if (p === "/api/files" && m === "GET") {
       const path = validPath(url.searchParams.get("path"));
+      const root = fRoot(url.searchParams.get("root"));
       if (path == null) return json(res, 400, { error: "Noto'g'ri yo'l" });
-      const r = await command(req, { action: "file", op: "list", target: path });
+      const r = await command(req, { action: "file", op: "list", target: path, root });
       if (!r.body.ok) return json(res, r.status, r.body);
       let entries = [];
       try { entries = JSON.parse(r.body.out); } catch {}
-      return json(res, 200, { ok: true, path, entries });
+      return json(res, 200, { ok: true, path, root, entries });
+    }
+    if (p === "/api/files/rename" && m === "POST") {
+      const body = await readJson(req);
+      const path = validPath(body.path);
+      const dest = validPath(body.dest);
+      if (path == null || path === "." || dest == null || dest === ".") return json(res, 400, { error: "Noto'g'ri yo'l" });
+      const r = await command(req, { action: "file", op: "rename", target: path, dest, root: fRoot(body.root) });
+      return json(res, r.status, r.body);
+    }
+    if (p === "/api/files/copy" && m === "POST") {
+      const body = await readJson(req);
+      const path = validPath(body.path);
+      const dest = validPath(body.dest);
+      if (path == null || path === "." || dest == null || dest === ".") return json(res, 400, { error: "Noto'g'ri yo'l" });
+      const r = await command(req, { action: "file", op: "copy", target: path, dest, root: fRoot(body.root) });
+      return json(res, r.status, r.body);
     }
     if (p === "/api/files/mkdir" && m === "POST") {
       const body = await readJson(req);
       const path = validPath(body.path);
       if (path == null || path === ".") return json(res, 400, { error: "Noto'g'ri papka nomi" });
-      const r = await command(req, { action: "file", op: "mkdir", target: path });
+      const r = await command(req, { action: "file", op: "mkdir", target: path, root: fRoot(body.root) });
       return json(res, r.status, r.body);
     }
     if (p === "/api/files" && m === "DELETE") {
       const path = validPath(url.searchParams.get("path"));
       if (path == null || path === ".") return json(res, 400, { error: "Noto'g'ri yo'l" });
-      const r = await command(req, { action: "file", op: "delete", target: path });
+      const r = await command(req, { action: "file", op: "delete", target: path, root: fRoot(url.searchParams.get("root")) });
       return json(res, r.status, r.body);
     }
-    // O'qish/yozish/zip-yoyish uzoq cho'zilishi mumkin (katta fayl, sekin tarmoq) —
-    // shuning uchun fon ishi (jobs) orqali, boshqa deploy amallari kabi.
     if (p === "/api/files/read" && m === "POST") {
       const body = await readJson(req);
       const path = validPath(body.path);
       if (path == null || path === ".") return json(res, 400, { error: "Noto'g'ri yo'l" });
       if (!agent) return json(res, 503, { ok: false, error: "Telefon ulanmagan" });
-      return json(res, 202, { jobId: startJob(req, { action: "file", op: "read", target: path }).id });
+      return json(res, 202, { jobId: startJob(req, { action: "file", op: "read", target: path, root: fRoot(body.root) }).id });
     }
     if (p === "/api/files/write" && m === "POST") {
       let body;
@@ -471,7 +498,7 @@ export function createApp(env) {
       if (path == null || path === ".") return json(res, 400, { error: "Noto'g'ri yo'l" });
       if (!data) return json(res, 400, { error: "Fayl ma'lumoti bo'sh" });
       if (!agent) return json(res, 503, { ok: false, error: "Telefon ulanmagan" });
-      return json(res, 202, { jobId: startJob(req, { action: "file", op: "write", target: path, data }).id });
+      return json(res, 202, { jobId: startJob(req, { action: "file", op: "write", target: path, data, root: fRoot(body.root) }).id });
     }
     if (p === "/api/files/unzip" && m === "POST") {
       const body = await readJson(req);
@@ -479,7 +506,80 @@ export function createApp(env) {
       const dest = validPath(body.dest);
       if (path == null || path === "." || dest == null) return json(res, 400, { error: "Noto'g'ri yo'l" });
       if (!agent) return json(res, 503, { ok: false, error: "Telefon ulanmagan" });
-      return json(res, 202, { jobId: startJob(req, { action: "file", op: "unzip", target: path, dest }).id });
+      return json(res, 202, { jobId: startJob(req, { action: "file", op: "unzip", target: path, dest, root: fRoot(body.root) }).id });
+    }
+
+    // ---------- Zaryad chegarasi, Ekran rasmi, Bufer va Zaxira ----------
+    if (p === "/api/battery-limit" && m === "GET") {
+      const r = await command(req, { action: "battery_limit", op: "status" });
+      if (!r.body.ok) return json(res, r.status, r.body);
+      let data = {};
+      try { data = JSON.parse(r.body.out); } catch {}
+      return json(res, 200, { ok: true, ...data });
+    }
+    if (p === "/api/battery-limit" && m === "POST") {
+      const body = await readJson(req);
+      const enabled = Boolean(body.enabled);
+      const min = Math.max(20, Math.min(90, parseInt(body.min ?? 50, 10) || 50));
+      const max = Math.max(min + 5, Math.min(95, parseInt(body.max ?? 80, 10) || 80));
+      const r = await command(req, { action: "battery_limit", op: "set", enabled, min, max });
+      if (!r.body.ok) return json(res, r.status, r.body);
+      let data = {};
+      try { data = JSON.parse(r.body.out); } catch {}
+      return json(res, 200, { ok: true, ...data });
+    }
+    if (p === "/api/screenshot" && m === "POST") {
+      if (!agent) return json(res, 503, { ok: false, error: "Telefon ulanmagan" });
+      return json(res, 202, { jobId: startJob(req, { action: "screenshot", op: "take", target: "screen" }).id });
+    }
+    if (p === "/api/clipboard" && m === "GET") {
+      const r = await command(req, { action: "clipboard", op: "get" });
+      if (!r.body.ok) return json(res, r.status, r.body);
+      let data = {};
+      try { data = JSON.parse(r.body.out); } catch {}
+      return json(res, 200, { ok: true, text: data.text || "" });
+    }
+    if (p === "/api/clipboard" && m === "POST") {
+      const body = await readJson(req);
+      const text = String(body.text || "");
+      if (text.length > 3500) return json(res, 400, { error: "Matn juda uzun" });
+      const r = await command(req, { action: "clipboard", op: "set", text });
+      return json(res, r.status, r.body);
+    }
+    if (p === "/api/backup" && m === "POST") {
+      if (!agent) return json(res, 503, { ok: false, error: "Telefon ulanmagan" });
+      return json(res, 202, { jobId: startJob(req, { action: "backup", op: "create", target: "home" }).id });
+    }
+
+    // ---------- Fonda ishlayotgan ilovalar va RAM optimizatsiyasi ----------
+    if (p === "/api/apps" && m === "GET") {
+      const r = await command(req, { action: "apps", op: "list" });
+      if (!r.body.ok) return json(res, r.status === 200 ? 502 : r.status, r.body);
+      let apps = [];
+      try { apps = JSON.parse(r.body.out); } catch {}
+      return json(res, 200, { ok: true, apps });
+    }
+    if (p === "/api/apps/optimize" && m === "POST") {
+      const r = await command(req, { action: "apps", op: "optimize" });
+      return json(res, r.status, r.body);
+    }
+    if ((mm = p.match(/^\/api\/apps\/([^/]+)\/stop$/)) && m === "POST") {
+      const pkg = decodeURIComponent(mm[1]);
+      if (!/^[a-zA-Z0-9._]{3,120}$/.test(pkg)) return json(res, 400, { error: "Noto'g'ri paket nomi" });
+      const r = await command(req, { action: "apps", op: "stop", target: pkg });
+      return json(res, r.status, r.body);
+    }
+
+    // ---------- Erkin shell (Termux foydalanuvchisi huquqida) ----------
+    if (p === "/api/shell" && m === "POST") {
+      if (cfg.disableShell) return json(res, 403, { error: "Terminal server sozlamasida o'chirilgan (DISABLE_SHELL=true)" });
+      const body = await readJson(req);
+      const cmd = String(body.cmd || "").trim();
+      const cwd = validPath(body.cwd) || ".";
+      if (!cmd) return json(res, 400, { error: "Buyruq bo'sh" });
+      if (cmd.length > 2000) return json(res, 400, { error: "Buyruq juda uzun" });
+      if (!agent) return json(res, 503, { ok: false, error: "Telefon ulanmagan" });
+      return json(res, 202, { jobId: startJob(req, { action: "shell", cmd, cwd }).id });
     }
 
     return json(res, 404, { error: "Topilmadi" });
@@ -549,6 +649,18 @@ export function createApp(env) {
         if (history.length > HISTORY_MAX) history.shift();
         broadcast({ type: "stats", data: lastStats });
         if (alerts.enabled) for (const a of evaluate(lastStats, prev, cfg.thresholds)) alerts.send(a.key, a.text);
+      } else if (m.type === "notif" && m.data && typeof m.data === "object") {
+        const { app = "", title = "", text = "", time = "" } = m.data;
+        broadcast({ type: "notif", data: m.data });
+        if (alerts.enabled) {
+          const lines = [
+            `🔔 ${app || "Bildirishnoma"}`,
+            title ? `👤 Kimdan: ${title}` : "",
+            text ? `💬 ${text}` : "",
+            time ? `🕒 ${time}` : "",
+          ].filter(Boolean);
+          alerts.send(`notif:${crypto.randomUUID()}`, lines.join("\n"), { force: true });
+        }
       } else if (m.type === "result" && typeof m.id === "string") {
         const p = pending.get(m.id);
         if (!p) return;
@@ -622,6 +734,8 @@ export function createApp(env) {
     close: () =>
       new Promise((resolve) => {
         clearInterval(heartbeat);
+        clearInterval(histTimer);
+        saveHistory();
         clearTimeout(offlineTimer);
         for (const p of pending.values()) clearTimeout(p.timer);
         for (const ws of [...agentWss.clients, ...panelWss.clients]) ws.terminate();

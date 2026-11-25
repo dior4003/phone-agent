@@ -15,7 +15,7 @@ export class Alerts {
     if (!this.enabled) return false;
     const now = Date.now();
     if (!force && now - (this.last.get(key) || 0) < this.cooldownMs) return false;
-    this.last.set(key, now);
+    if (!force) this.last.set(key, now);
     try {
       const r = await fetch(`${this.apiBase}/bot${this.token}/sendMessage`, {
         method: "POST",

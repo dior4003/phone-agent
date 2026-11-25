@@ -36,4 +36,16 @@ class Prefs(ctx: Context) {
     var telegramChatId: String
         get() = sp.getString("tgChatId", "") ?: ""
         set(v) = sp.edit().putString("tgChatId", v).apply()
+
+    var chargeLimitEnabled: Boolean
+        get() = sp.getBoolean("chargeLimitEnabled", false)
+        set(v) = sp.edit().putBoolean("chargeLimitEnabled", v).apply()
+
+    var chargeMin: Int
+        get() = sp.getInt("chargeMin", 50)
+        set(v) = sp.edit().putInt("chargeMin", v.coerceIn(20, 90)).apply()
+
+    var chargeMax: Int
+        get() = sp.getInt("chargeMax", 80)
+        set(v) = sp.edit().putInt("chargeMax", v.coerceIn(30, 95)).apply()
 }

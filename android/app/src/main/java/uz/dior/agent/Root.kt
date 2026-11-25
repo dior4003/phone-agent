@@ -130,6 +130,52 @@ object Root {
     /** Android holatini o'qish uchun (Termux muhitisiz). */
     fun raw(cmd: String): String = Shell.cmd(cmd).exec().out.joinToString("\n")
 
+    fun runAsRoot(cmd: String): Pair<Boolean, String> {
+        val r = Shell.cmd("export PATH=/data/data/com.termux/files/usr/bin:\$PATH; $cmd").exec()
+        return r.isSuccess to (r.out + r.err).joinToString("\n")
+    }
+
+    fun runRootLong(cmd: String, timeoutSec: Long, maxOutChars: Int = 200_000): Pair<Boolean, String> {
+        return try {
+            val full = "export PATH=/data/data/com.termux/files/usr/bin:\$PATH; $cmd"
+            val p = ProcessBuilder("su", "-c", full).redirectErrorStream(true).start()
+            val out = StringBuffer()
+            val reader = Thread {
+                try { p.inputStream.bufferedReader().forEachLine { if (out.length < maxOutChars) out.append(it).append('\n') } } catch (_: Exception) {}
+            }
+            reader.start()
+            if (!p.waitFor(timeoutSec, TimeUnit.SECONDS)) {
+                p.destroyForcibly(); reader.join(1000)
+                return false to ("Vaqt tugadi ($timeoutSec soniya)")
+            }
+            reader.join(2000)
+            (p.exitValue() == 0) to out.toString()
+        } catch (e: Exception) {
+            false to ("Xato: " + (e.message ?: ""))
+        }
+    }
+
+    fun writeRootStdin(cmd: String, data: ByteArray, timeoutSec: Long): Pair<Boolean, String> {
+        return try {
+            val full = "export PATH=/data/data/com.termux/files/usr/bin:\$PATH; $cmd"
+            val p = ProcessBuilder("su", "-c", full).redirectErrorStream(true).start()
+            val out = StringBuffer()
+            val reader = Thread {
+                try { p.inputStream.bufferedReader().forEachLine { if (out.length < 50_000) out.append(it).append('\n') } } catch (_: Exception) {}
+            }
+            reader.start()
+            p.outputStream.use { it.write(data); it.flush() }
+            if (!p.waitFor(timeoutSec, TimeUnit.SECONDS)) {
+                p.destroyForcibly(); reader.join(1000)
+                return false to "Vaqt tugadi ($timeoutSec soniya)"
+            }
+            reader.join(2000)
+            (p.exitValue() == 0) to out.toString()
+        } catch (e: Exception) {
+            false to ("Yozib bo'lmadi: " + (e.message ?: ""))
+        }
+    }
+
     /** Fon rejimida bajarish (natijani kutmaydi). */
     fun fireAndForget(cmd: String) {
         Shell.cmd("($cmd) >/dev/null 2>&1 &").exec()

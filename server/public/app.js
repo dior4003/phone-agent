@@ -15,7 +15,7 @@ function el(tag, props = {}, ...kids) {
   return e;
 }
 
-const TABS = new Set(["home", "device", "services", "deploy", "files", "logs"]);
+const TABS = new Set(["home", "device", "services", "deploy", "files", "terminal", "logs"]);
 
 const S = {
   token: sessionStorage.getItem("pa_token"),
@@ -114,6 +114,7 @@ function setTab(tab, pushHash = true) {
   }
   if (tab === "files" && S.agent && !S.fmLoaded) fmLoad(fmPath);
   if (tab === "services" && S.agent) loadPm2();
+  if (tab === "device" && S.agent) { loadBgApps(); loadChargeLimit(); }
   if (tab === "logs") loadAudit();
 }
 
@@ -134,7 +135,7 @@ function setAgent(on) {
   $("#offline").hidden = on;
   $("#dash").classList.toggle("dim", !on);
   document.querySelectorAll("#dash button").forEach((b) => { if (b.id !== "auditRefresh") b.disabled = !on || S.busy.has(b.dataset.key); });
-  document.querySelectorAll("#dash input, #dash select").forEach((i) => { i.disabled = !on; });
+  document.querySelectorAll("#dash input, #dash select, #dash textarea").forEach((i) => { i.disabled = !on; });
   if (!on) {
     S.stats = null;
     S.fmLoaded = false;
@@ -357,15 +358,27 @@ async function loadPm2() {
   }
 }
 
-async function loadLogs() {
+let logTimer = null;
+async function loadLogs(silent = false) {
   const name = $("#logSel").value;
-  if (!name) return toast("Log manbai tanlanmagan", true);
+  if (!name) return silent ? null : toast("Log manbai tanlanmagan", true);
   const out = $("#logOut");
-  out.textContent = "Yuklanmoqda…";
+  if (!silent) out.textContent = "Yuklanmoqda…";
   const r = await api(`/api/logs/${encodeURIComponent(name)}?lines=${$("#logLines").value}`);
-  if (r.ok && r.data.ok) { out.textContent = r.data.out || "(bo'sh)"; out.scrollTop = out.scrollHeight; }
-  else out.textContent = "Xato: " + (r.data.error || r.data.out || "noma'lum");
+  if (r.ok && r.data.ok) {
+    const text = r.data.out || "(bo'sh)";
+    if (out.textContent !== text) { out.textContent = text; out.scrollTop = out.scrollHeight; }
+  } else if (!silent) {
+    out.textContent = "Xato: " + (r.data.error || r.data.out || "noma'lum");
+  }
 }
+$("#logLive").addEventListener("change", (e) => {
+  clearInterval(logTimer); logTimer = null;
+  if (e.currentTarget.checked) {
+    loadLogs(true);
+    logTimer = setInterval(() => { if (S.agent && S.tab === "logs") loadLogs(true); }, 2500);
+  }
+});
 
 const AUDIT_TEXT = {
   login_ok: () => "Panelga kirildi",
@@ -426,6 +439,8 @@ function logout() {
   const ws = S.ws; S.ws = null;
   if (ws) try { ws.close(); } catch {}
   S.svcSig = ""; S.logSig = ""; S.fmLoaded = false;
+  clearInterval(logTimer); logTimer = null; $("#logLive").checked = false;
+  termCwd = "."; $("#termCwd").textContent = "~";
   show("login");
   initLogin();
 }
@@ -438,6 +453,7 @@ async function start() {
   const h = await api("/api/history");
   if (h.ok) for (const x of h.data.samples || []) pushHist(x);
   const st = await api("/api/status");
+  api("/api/health").then((h) => { if (h.ok && !h.data.totp) $("#termSecWarn").hidden = false; });
   if (st.ok && st.data.serverVersion) {
     S.serverVersion = st.data.serverVersion;
     $("#srvVer").textContent = "v" + S.serverVersion;
@@ -489,6 +505,113 @@ $("#netWifi").addEventListener("change", (e) => toggleNetwork(e.currentTarget, $
 $("#netBt").addEventListener("change", (e) => toggleNetwork(e.currentTarget, $("#netBtState"), "bt_on", "bt_off", false));
 $("#netData").addEventListener("change", (e) => toggleNetwork(e.currentTarget, $("#netDataState"), "data_on", "data_off", true));
 
+
+
+// ---------- Zaryad chegarasi, Ekran rasmi, Bufer, Backup ----------
+async function loadChargeLimit() {
+  if (!S.agent) return;
+  const r = await api("/api/battery-limit");
+  if (r.ok && r.data.ok) {
+    $("#chgLimit").checked = !!r.data.enabled;
+    $("#chgMin").value = r.data.min ?? 50;
+    $("#chgMax").value = r.data.max ?? 80;
+  }
+}
+async function saveChargeLimit() {
+  const body = {
+    enabled: $("#chgLimit").checked,
+    min: parseInt($("#chgMin").value, 10) || 50,
+    max: parseInt($("#chgMax").value, 10) || 80,
+  };
+  const r = await api("/api/battery-limit", { method: "POST", body });
+  if (r.ok && r.data.ok) toast(body.enabled ? `Zaryad nazorati yoqildi (${r.data.min}%–${r.data.max}%)` : "Zaryad nazorati o'chirildi");
+  else toast(r.data.error || r.data.out || "Xato", true);
+}
+$("#chgLimit").addEventListener("change", saveChargeLimit);
+$("#chgSave").addEventListener("click", saveChargeLimit);
+
+$("#shotBtn").addEventListener("click", async () => {
+  const btn = $("#shotBtn");
+  const st = $("#shotStatus");
+  btn.disabled = true; st.hidden = false; st.textContent = "Ekran rasmi olinmoqda…";
+  const r = await runJob("/api/screenshot", {}, (s) => { st.textContent = `Olinmoqda… ${s} s`; });
+  btn.disabled = !S.agent;
+  if (r.ok && r.data.ok && r.data.out) {
+    $("#shotImg").src = "data:image/png;base64," + r.data.out;
+    $("#shotImg").hidden = false;
+    st.hidden = true;
+  } else {
+    st.textContent = r.data.error || r.data.out || "Olib bo'lmadi";
+  }
+});
+
+$("#clipGet").addEventListener("click", async () => {
+  const r = await api("/api/clipboard");
+  if (r.ok && r.data.ok) { $("#clipText").value = r.data.text || ""; toast("Bufer olindi"); }
+  else toast(r.data.error || "Xato", true);
+});
+$("#clipSet").addEventListener("click", async () => {
+  const r = await api("/api/clipboard", { method: "POST", body: { text: $("#clipText").value } });
+  if (r.ok && r.data.ok) toast("Telefon buferiga yozildi");
+  else toast(r.data.error || r.data.out || "Xato", true);
+});
+
+$("#backupBtn").addEventListener("click", async () => {
+  const btn = $("#backupBtn");
+  const st = $("#backupStatus");
+  btn.disabled = true; st.hidden = false; st.textContent = "Zaxira yaratilmoqda…";
+  const r = await runJob("/api/backup", {}, (s) => { st.textContent = `Zaxira yaratilmoqda… ${s} s`; });
+  btn.disabled = !S.agent;
+  if (r.ok && r.data.ok) {
+    st.textContent = r.data.out || "Zaxira yaratildi";
+    toast("Zaxira yaratildi");
+    S.fmLoaded = false;
+  } else {
+    st.textContent = r.data.error || r.data.out || "Xato";
+    toast("Zaxira yaratishda xato", true);
+  }
+});
+
+// ---------- Fonda ishlayotgan ilovalar va optimizatsiya ----------
+async function loadBgApps() {
+  if (!S.agent) return;
+  const list = $("#bgApps");
+  list.replaceChildren(el("li", { class: "empty" }, "Tekshirilmoqda…"));
+  const r = await api("/api/apps");
+  if (!r.ok || !r.data.ok) {
+    list.replaceChildren(el("li", { class: "empty" }, r.data.error || r.data.out || "Ro'yxatni olib bo'lmadi"));
+    return;
+  }
+  const apps = r.data.apps || [];
+  list.replaceChildren();
+  if (!apps.length) return list.append(el("li", { class: "empty" }, "Fonda ortiqcha ilova topilmadi."));
+  for (const a of apps) {
+    list.append(el("li", {},
+      el("span", { class: "name grow" }, a.pkg),
+      el("span", { class: "meta" }, `${a.memMb} MB`),
+      el("div", { class: "acts" },
+        el("button", { class: "danger", onclick: () => stopBgApp(a.pkg) }, "To'xtatish"))));
+  }
+}
+
+async function stopBgApp(pkg) {
+  const r = await api(`/api/apps/${encodeURIComponent(pkg)}/stop`, { method: "POST" });
+  if (r.ok && r.data.ok) { toast(r.data.out || `To'xtatildi: ${pkg}`); loadBgApps(); }
+  else toast(r.data.error || r.data.out || "Xato", true);
+}
+
+$("#appsRefresh").addEventListener("click", loadBgApps);
+$("#appsOptimize").addEventListener("click", async () => {
+  const btn = $("#appsOptimize");
+  btn.disabled = true;
+  btn.textContent = "Tozalanmoqda…";
+  const r = await api("/api/apps/optimize", { method: "POST" });
+  btn.disabled = !S.agent;
+  btn.textContent = "⚡ Optimizatsiya";
+  if (r.ok && r.data.ok) { toast(r.data.out || "Optimizatsiya bajarildi"); loadBgApps(); setTimeout(refreshStatus, 1000); }
+  else toast(r.data.error || r.data.out || "Xato", true);
+});
+
 // ---------- Telefonni topish ----------
 $("#findRing").addEventListener("click", async () => {
   const r = await api("/api/find/ring", { method: "POST" });
@@ -532,6 +655,8 @@ $("#brightSet").addEventListener("click", async () => {
 
 // ---------- Fayl menejeri ----------
 let fmPath = ".";
+let fmRoot = "home";
+const fmSel = new Set();
 
 function fmtBytes(n) {
   if (!Number.isFinite(n)) return "";
@@ -548,7 +673,7 @@ function fmJoin(path, name) {
 function fmRenderCrumbs(path) {
   const wrap = $("#fmCrumbs");
   wrap.replaceChildren();
-  wrap.append(el("span", { onclick: () => fmLoad(".") }, "🏠"));
+  wrap.append(el("span", { onclick: () => fmLoad(".") }, fmRoot === "sdcard" ? "📱 /sdcard" : "🏠 ~"));
   if (path === ".") return;
   const parts = path.split("/");
   let acc = "";
@@ -560,41 +685,108 @@ function fmRenderCrumbs(path) {
   });
 }
 
+function setFmRoot(root) {
+  fmRoot = root;
+  $("#fmRootHome").className = root === "home" ? "primary" : "ghost";
+  $("#fmRootSd").className = root === "sdcard" ? "primary" : "ghost";
+  fmLoad(".");
+}
+$("#fmRootHome").addEventListener("click", () => setFmRoot("home"));
+$("#fmRootSd").addEventListener("click", () => setFmRoot("sdcard"));
+
 async function fmLoad(path) {
   fmPath = path;
   S.fmLoaded = true;
+  fmSel.clear();
+  $("#fmDelSel").hidden = true;
   $("#fmList").replaceChildren(el("li", { class: "empty" }, "Yuklanmoqda…"));
   $("#fmStatus").textContent = "\u00a0";
-  const r = await api("/api/files?path=" + encodeURIComponent(path));
+  const r = await api(`/api/files?path=${encodeURIComponent(path)}&root=${fmRoot}`);
   if (!r.ok || !r.data.ok) {
     $("#fmList").replaceChildren(el("li", { class: "empty" }, r.data.error || r.data.out || "Xato"));
     return;
   }
   fmRenderCrumbs(path);
-  const entries = (r.data.entries || []).slice().sort((a, b) => (b.type === "d") - (a.type === "d") || a.name.localeCompare(b.name));
+  S.fmEntries = (r.data.entries || []).slice().sort((a, b) => (b.type === "d") - (a.type === "d") || a.name.localeCompare(b.name));
+  $("#fmSearch").value = "";
+  fmRenderEntries(S.fmEntries);
+  const canBuild = fmRoot === "home" && path !== "." && !path.includes("/");
+  $("#fmBuild").hidden = !canBuild;
+  $("#fmBuild").dataset.dir = canBuild ? path : "";
+}
+
+function fmRenderEntries(entries) {
+  const path = fmPath;
   $("#fmList").replaceChildren();
-  if (!entries.length) $("#fmList").append(el("li", { class: "empty" }, "Papka bo'sh"));
+  if (!entries.length) { $("#fmList").append(el("li", { class: "empty" }, "Hech narsa topilmadi")); return; }
   for (const e of entries) {
     const isDir = e.type === "d";
-    const nameSpan = el("span", { class: "name" + (isDir ? " dir" : ""), onclick: isDir ? () => fmLoad(fmJoin(path, e.name)) : null }, (isDir ? "📁 " : "📄 ") + e.name);
+    const isZip = !isDir && /\.zip$/i.test(e.name);
+    const nameSpan = el("span", {
+      class: "name" + (isDir ? " dir" : isZip ? "" : " file"),
+      onclick: isDir ? () => fmLoad(fmJoin(path, e.name)) : (isZip ? null : () => fmEdit(path, e.name, e.size))
+    }, (isDir ? "📁 " : "📄 ") + e.name);
     const metaSpan = el("span", { class: "meta grow" }, isDir ? "" : fmtBytes(e.size));
     const acts = el("div", { class: "acts" });
     if (!isDir) {
+      if (!isZip) acts.append(el("button", { class: "ghost", onclick: () => fmEdit(path, e.name, e.size) }, "Tahrirlash"));
       acts.append(el("button", { class: "ghost", onclick: () => fmDownload(path, e.name) }, "⬇"));
-      if (/\.zip$/i.test(e.name)) acts.append(el("button", { class: "ghost", onclick: () => fmUnzip(path, e.name) }, "Yoyish"));
+      if (isZip) acts.append(el("button", { class: "ghost", onclick: () => fmUnzip(path, e.name) }, "Yoyish"));
     }
+    acts.append(el("button", { class: "ghost", onclick: () => fmCopy(path, e.name) }, "Nusxalash"));
+    acts.append(el("button", { class: "ghost", onclick: () => fmRename(path, e.name) }, "Nomlash"));
     acts.append(el("button", { class: "danger", onclick: () => fmDelete(path, e.name, isDir) }, "O'chirish"));
-    $("#fmList").append(el("li", {}, nameSpan, metaSpan, acts));
+    const chk = el("input", {
+      type: "checkbox", class: "fm-chk", checked: fmSel.has(e.name),
+      onchange: (ev) => {
+        if (ev.currentTarget.checked) fmSel.add(e.name); else fmSel.delete(e.name);
+        $("#fmDelSel").hidden = fmSel.size === 0;
+        $("#fmDelSel").textContent = `Tanlanganlarni o'chirish (${fmSel.size})`;
+      }
+    });
+    $("#fmList").append(el("li", {}, chk, nameSpan, metaSpan, acts));
   }
-  const canBuild = path !== "." && !path.includes("/");
-  $("#fmBuild").hidden = !canBuild;
-  $("#fmBuild").dataset.dir = canBuild ? path : "";
+}
+
+$("#fmSearch").addEventListener("input", (e) => {
+  const q = e.currentTarget.value.trim().toLowerCase();
+  const list = q ? (S.fmEntries || []).filter((x) => x.name.toLowerCase().includes(q)) : (S.fmEntries || []);
+  fmRenderEntries(list);
+});
+
+
+async function fmCopy(path, name) {
+  const next = (prompt(`"${name}" nusxasi uchun yangi nom:`, name + "_copy") || "").trim();
+  if (!next || next === name) return;
+  const r = await api("/api/files/copy", { method: "POST", body: { path: fmJoin(path, name), dest: fmJoin(path, next), root: fmRoot } });
+  if (r.ok && r.data.ok) { toast(`Nusxalandi: "${next}"`); fmLoad(path); }
+  else toast(r.data.error || r.data.out || "Xato", true);
+}
+
+$("#fmDelSel").addEventListener("click", async () => {
+  const names = Array.from(fmSel);
+  if (!names.length) return;
+  const ok = await confirmDialog(`Tanlangan ${names.length} ta element butunlay o'chirilsinmi?`, "O'chirish");
+  if (!ok) return;
+  for (const name of names) {
+    await api(`/api/files?path=${encodeURIComponent(fmJoin(fmPath, name))}&root=${fmRoot}`, { method: "DELETE" });
+  }
+  toast(`${names.length} ta element o'chirildi`);
+  fmLoad(fmPath);
+});
+
+async function fmRename(path, name) {
+  const next = (prompt(`"${name}" uchun yangi nom:`, name) || "").trim();
+  if (!next || next === name) return;
+  const r = await api("/api/files/rename", { method: "POST", body: { path: fmJoin(path, name), dest: fmJoin(path, next), root: fmRoot } });
+  if (r.ok && r.data.ok) { toast(`"${name}" → "${next}"`); fmLoad(path); }
+  else toast(r.data.error || r.data.out || "Xato", true);
 }
 
 async function fmDownload(path, name) {
   const full = fmJoin(path, name);
   $("#fmStatus").textContent = `Yuklab olinmoqda: ${name}…`;
-  const r = await runJob("/api/files/read", { path: full }, (s) => { $("#fmStatus").textContent = `Yuklab olinmoqda: ${name}… ${s} s`; });
+  const r = await runJob("/api/files/read", { path: full, root: fmRoot }, (s) => { $("#fmStatus").textContent = `Yuklab olinmoqda: ${name}… ${s} s`; });
   if (!r.ok || !r.data.ok) { $("#fmStatus").textContent = r.data.error || r.data.out || "Yuklab olishda xato"; return; }
   try {
     const bin = atob(r.data.out);
@@ -613,7 +805,7 @@ async function fmDownload(path, name) {
 async function fmDelete(path, name, isDir) {
   const ok = await confirmDialog(`"${name}"${isDir ? " (papka, ichidagi hammasi bilan)" : ""} butunlay o'chirilsinmi?`, "O'chirish");
   if (!ok) return;
-  const r = await api("/api/files?path=" + encodeURIComponent(fmJoin(path, name)), { method: "DELETE" });
+  const r = await api(`/api/files?path=${encodeURIComponent(fmJoin(path, name))}&root=${fmRoot}`, { method: "DELETE" });
   if (r.ok && r.data.ok) { toast(`"${name}" o'chirildi`); fmLoad(path); }
   else toast(r.data.error || r.data.out || "Xato", true);
 }
@@ -624,7 +816,7 @@ async function fmUnzip(path, name) {
   const ok = await confirmDialog(`"${name}" "${dest}" papkasiga yoyilsinmi?`, "Yoyish");
   if (!ok) return;
   $("#fmStatus").textContent = `Yoyilmoqda: ${name}…`;
-  const r = await runJob("/api/files/unzip", { path: full, dest }, (s) => { $("#fmStatus").textContent = `Yoyilmoqda… ${s} s`; });
+  const r = await runJob("/api/files/unzip", { path: full, dest, root: fmRoot }, (s) => { $("#fmStatus").textContent = `Yoyilmoqda… ${s} s`; });
   if (!r.ok || !r.data.ok) { $("#fmStatus").textContent = r.data.error || r.data.out || "Yoyishda xato"; return; }
   $("#fmStatus").textContent = `Yoyildi: ${dest}`;
   fmLoad(fmPath);
@@ -648,7 +840,7 @@ $("#fmUpload").addEventListener("change", async (e) => {
     let data;
     try { data = await fileToBase64(file); } catch { toast(`"${file.name}" o'qilmadi`, true); continue; }
     const full = fmJoin(fmPath, file.name);
-    const r = await runJob("/api/files/write", { path: full, data }, (s) => { $("#fmStatus").textContent = `Yuklanmoqda: ${file.name}… ${s} s`; });
+    const r = await runJob("/api/files/write", { path: full, data, root: fmRoot }, (s) => { $("#fmStatus").textContent = `Yuklanmoqda: ${file.name}… ${s} s`; });
     if (!r.ok || !r.data.ok) toast(r.data.error || r.data.out || `"${file.name}" yuklashda xato`, true);
   }
   $("#fmStatus").textContent = "Tayyor.";
@@ -658,7 +850,7 @@ $("#fmUpload").addEventListener("change", async (e) => {
 $("#fmMkdir").addEventListener("click", async () => {
   const name = (prompt("Yangi papka nomi:") || "").trim();
   if (!name) return;
-  const r = await api("/api/files/mkdir", { method: "POST", body: { path: fmJoin(fmPath, name) } });
+  const r = await api("/api/files/mkdir", { method: "POST", body: { path: fmJoin(fmPath, name), root: fmRoot } });
   if (r.ok && r.data.ok) fmLoad(fmPath);
   else toast(r.data.error || r.data.out || "Xato", true);
 });
@@ -838,6 +1030,146 @@ $("#reboot").addEventListener("click", async () => {
   const r = await api("/api/device/reboot", { method: "POST" });
   if (r.ok && r.data.ok) toast("Telefon qayta yoqilmoqda");
   else toast(r.data.error || r.data.out || "Xato", true);
+  loadAudit();
+});
+
+
+// ---------- Fayl o'qish / tahrirlash / saqlash ----------
+let fmEditTarget = "";
+
+function b64ToUtf8(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+
+function utf8ToB64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+async function fmEdit(path, name, size = 0) {
+  if (size > 1024 * 1024) return toast("Fayl tahrirlash uchun juda katta (> 1 MB), yuklab oling", true);
+  const full = fmJoin(path, name);
+  $("#fmStatus").textContent = `Ochilmoqda: ${name}…`;
+  const r = await runJob("/api/files/read", { path: full, root: fmRoot }, (s) => { $("#fmStatus").textContent = `Ochilmoqda: ${name}… ${s} s`; });
+  if (!r.ok || !r.data.ok) { $("#fmStatus").textContent = r.data.error || r.data.out || "Faylni o'qib bo'lmadi"; return; }
+  try {
+    fmEditTarget = full;
+    $("#fmEditName").textContent = full;
+    $("#fmEditText").value = b64ToUtf8(r.data.out);
+    $("#fmEditor").hidden = false;
+    $("#fmStatus").textContent = `Tahrirlanmoqda: ${name}`;
+    $("#fmEditor").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch {
+    $("#fmStatus").textContent = "Fayl matnini dekodlab bo'lmadi";
+  }
+}
+
+$("#fmNewFile").addEventListener("click", () => {
+  const name = (prompt("Yangi fayl nomi (masalan: .env yoki test.py):") || "").trim();
+  if (!name) return;
+  const full = fmJoin(fmPath, name);
+  fmEditTarget = full;
+  $("#fmEditName").textContent = full;
+  $("#fmEditText").value = "";
+  $("#fmEditor").hidden = false;
+  $("#fmEditText").focus();
+  $("#fmStatus").textContent = `Yangi fayl: ${name} (saqlash uchun "Saqlash" ni bosing)`;
+});
+
+$("#fmSave").addEventListener("click", async () => {
+  if (!fmEditTarget) return;
+  const btn = $("#fmSave");
+  btn.disabled = true;
+  btn.textContent = "Saqlanmoqda…";
+  const text = $("#fmEditText").value;
+  const data = utf8ToB64(text.length ? text : "\n");
+  const r = await runJob("/api/files/write", { path: fmEditTarget, data, root: fmRoot }, (s) => { $("#fmStatus").textContent = `Saqlanmoqda… ${s} s`; });
+  btn.disabled = !S.agent;
+  btn.textContent = "Saqlash";
+  if (r.ok && r.data.ok) {
+    toast(`Saqlandi: ${fmEditTarget}`);
+    $("#fmStatus").textContent = `Saqlandi: ${fmEditTarget}`;
+    fmLoad(fmPath);
+  } else {
+    toast(r.data.error || r.data.out || "Saqlashda xato", true);
+    $("#fmStatus").textContent = r.data.error || r.data.out || "Saqlashda xato";
+  }
+});
+
+$("#fmEditClose").addEventListener("click", () => {
+  $("#fmEditor").hidden = true;
+  fmEditTarget = "";
+});
+
+// ---------- Erkin Terminal ----------
+const termHist = [];
+let termIdx = 0;
+let termCwd = ".";
+
+function termAppend(text) {
+  const out = $("#termOut");
+  if (out.textContent.startsWith("Termux buyrug'ini kiriting")) out.textContent = "";
+  out.textContent += text;
+  out.scrollTop = out.scrollHeight;
+}
+
+$("#termClear").addEventListener("click", () => {
+  $("#termOut").textContent = "";
+});
+
+$("#termCmd").addEventListener("keydown", (e) => {
+  if (e.key === "ArrowUp" && termHist.length) {
+    e.preventDefault();
+    termIdx = Math.max(0, termIdx - 1);
+    e.currentTarget.value = termHist[termIdx] || "";
+  } else if (e.key === "ArrowDown" && termHist.length) {
+    e.preventDefault();
+    termIdx = Math.min(termHist.length, termIdx + 1);
+    e.currentTarget.value = termIdx < termHist.length ? termHist[termIdx] : "";
+  }
+});
+
+$("#termForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const inp = $("#termCmd");
+  const cmd = inp.value.trim();
+  if (!cmd) return;
+  termHist.push(cmd);
+  if (termHist.length > 50) termHist.shift();
+  termIdx = termHist.length;
+  inp.value = "";
+
+  const btn = $("#termRun");
+  btn.disabled = true;
+  btn.textContent = "…";
+  termAppend(`\n${termCwd === "." ? "~" : "~/" + termCwd} $ ${cmd}\n`);
+  const r = await runJob("/api/shell", { cmd, cwd: termCwd });
+  btn.disabled = !S.agent;
+  btn.textContent = "Bajarish";
+  let outText = r.data.out || "";
+  try {
+    const parsed = JSON.parse(outText);
+    if (parsed && typeof parsed === "object" && "out" in parsed) {
+      outText = parsed.out || "";
+      if (parsed.cwd) {
+        termCwd = parsed.cwd;
+        $("#termCwd").textContent = termCwd === "." ? "~" : "~/" + termCwd;
+      }
+    }
+  } catch {}
+  if (r.ok && r.data.ok) {
+    termAppend((outText || "(bajarildi)") + (String(outText).endsWith("\n") ? "" : "\n"));
+  } else {
+    termAppend(`[xato] ${r.data.error || outText || "noma'lum"}\n`);
+  }
   loadAudit();
 });
 

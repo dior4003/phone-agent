@@ -22,6 +22,22 @@ class AgentService : Service() {
     companion object {
         /** MainActivity shu qiymatni ko'rsatadi. */
         @Volatile var state: String = "O'chiq"
+        @Volatile private var activeWs: WebSocket? = null
+
+        fun sendNotification(app: String, title: String, text: String, time: String) {
+            val w = activeWs ?: return
+            try {
+                val payload = JSONObject()
+                    .put("type", "notif")
+                    .put("data", JSONObject()
+                        .put("app", app)
+                        .put("title", title)
+                        .put("text", text)
+                        .put("time", time))
+                    .toString()
+                w.send(payload)
+            } catch (_: Exception) {}
+        }
     }
 
     private val client = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build()
@@ -74,12 +90,20 @@ class AgentService : Service() {
         state = "Ulanmoqda..."
         ws = client.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(w: WebSocket, r: Response) {
+                activeWs = w
                 retryMs = 3000L
                 state = "Ulangan"
                 statsTask?.cancel(false)
                 statsTask = worker.scheduleWithFixedDelay({
                     try {
-                        w.send(JSONObject().put("type", "stats").put("data", Stats.collect(this@AgentService)).toString())
+                        val st = Stats.collect(this@AgentService)
+                        val prefs = Prefs(this@AgentService)
+                        if (prefs.chargeLimitEnabled) {
+                            val bat = st.optInt("battery", -1)
+                            if (bat >= prefs.chargeMax) Actions.setCharging(false)
+                            else if (bat in 0..prefs.chargeMin) Actions.setCharging(true)
+                        }
+                        w.send(JSONObject().put("type", "stats").put("data", st).toString())
                     } catch (_: Exception) {
                     }
                 }, 0, 5, TimeUnit.SECONDS)
@@ -103,6 +127,7 @@ class AgentService : Service() {
     private fun reconnect(w: WebSocket, why: String) {
         if (w !== ws) return
         statsTask?.cancel(false)
+        if (activeWs === w) activeWs = null
         ws = null
         if (stopped) return
         state = "$why, ${retryMs / 1000} soniyadan keyin qayta uriniladi"
@@ -118,10 +143,12 @@ class AgentService : Service() {
         } catch (e: Exception) {
             false to (e.message ?: "Xato")
         }
+        val act = m.optString("action")
+        val limit = if (act == "file" || act == "screenshot") 21_000_000 else 100_000
         w.send(
             JSONObject()
                 .put("type", "result").put("id", m.optString("id"))
-                .put("ok", ok).put("out", out.take(60_000)).toString()
+                .put("ok", ok).put("out", out.take(limit)).toString()
         )
     }
 
@@ -129,6 +156,7 @@ class AgentService : Service() {
         stopped = true
         state = "O'chiq"
         statsTask?.cancel(true)
+        activeWs = null
         ws?.close(1000, "stop")
         worker.shutdownNow()
         cmdPool.shutdownNow()

@@ -56,6 +56,10 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
       <span>Fayllar</span>
     </button>
+    <button type="button" class="nav-btn" data-nav="terminal">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="4 17 10 11 4 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="19" x2="20" y2="19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <span>Terminal</span>
+    </button>
     <button type="button" class="nav-btn" data-nav="logs">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       <span>Loglar</span>
@@ -166,6 +170,58 @@
           </div>
         </section>
 
+        <section aria-labelledby="h-chg">
+          <div class="h-row">
+            <h2 id="h-chg">Zaryad chegarasi</h2>
+            <label class="switch"><input type="checkbox" id="chgLimit"><span class="slider"></span></label>
+          </div>
+          <p class="muted">Telefon 24/7 quvvatda tursa, batareyani asrash uchun maksimal darajada zaryadni to'xtatadi (root kerak).</p>
+          <div class="row-controls bright-row">
+            <label>Min % <input type="number" id="chgMin" min="20" max="90" value="50" style="width:76px"></label>
+            <label>Max % <input type="number" id="chgMax" min="30" max="95" value="80" style="width:76px"></label>
+            <button id="chgSave" class="primary">Saqlash</button>
+          </div>
+        </section>
+
+        <section aria-labelledby="h-shot">
+          <div class="h-row">
+            <h2 id="h-shot">Ekran rasmi</h2>
+            <button id="shotBtn" class="primary">Rasm olish</button>
+          </div>
+          <p id="shotStatus" class="muted" hidden></p>
+          <img id="shotImg" class="shot-img" alt="Telefon ekrani" hidden>
+        </section>
+
+        <section aria-labelledby="h-clip">
+          <h2 id="h-clip">Bufer (Clipboard)</h2>
+          <textarea id="clipText" class="clip-box" placeholder="Telefon buferi matni..."></textarea>
+          <div class="row-controls">
+            <button id="clipGet" class="ghost">Telefondan olish</button>
+            <button id="clipSet" class="primary">Telefonga yozish</button>
+          </div>
+        </section>
+
+        <section aria-labelledby="h-backup">
+          <div class="h-row">
+            <h2 id="h-backup">Loyihalar zaxirasi (Backup)</h2>
+            <button id="backupBtn" class="primary">Zaxira yaratish</button>
+          </div>
+          <p class="muted">Termux uy papkasini (<code>node_modules</code> va <code>.git</code> siz) <code>.tar.gz</code> qilib saqlaydi — keyin Fayllar bo'limidan yuklab olasiz.</p>
+          <p id="backupStatus" class="muted" hidden></p>
+        </section>
+
+        <section aria-labelledby="h-apps">
+          <div class="h-row">
+            <h2 id="h-apps">Fonda ishlayotgan ilovalar</h2>
+            <div class="acts">
+              <button id="appsRefresh" class="ghost">Yangilash</button>
+              <button id="appsOptimize" class="primary">⚡ Optimizatsiya</button>
+            </div>
+          </div>
+          <p class="muted">Termux va Phone Agent'dan tashqari fonda RAM yeyayotgan ilovalarni ko'rish va to'xtatish.</p>
+          <ul id="bgApps" class="rows"><li class="empty">Yuklash uchun "Yangilash" ni bosing.</li></ul>
+        </section>
+
         <section aria-labelledby="h-danger" class="danger-zone">
           <h2 id="h-danger">Telefonni boshqarish</h2>
           <p class="muted">Qayta yoqilganda barcha servislar vaqtincha to'xtaydi. Avtostart sozlangan bo'lsa, ular o'zi ko'tariladi.</p>
@@ -191,7 +247,7 @@
       <div class="tab-panel" data-tab="deploy" hidden>
         <section aria-labelledby="h-deploy">
           <h2 id="h-deploy">Yangi loyiha yuklash</h2>
-          <p class="muted">Git repo manzilidan yuklab, bog'liqliklarni o'rnatib, package.json dagi tayyor skriptlardan birini (masalan "dev" yoki "start") tanlab pm2 ga qo'shasiz.</p>
+          <p class="muted">Git repo manzilidan yuklab, bog'liqliklarni o'rnatib, Node.js (package.json), Python (requirements.txt / main.py) yoki PHP (composer.json / artisan) loyihalarini o'rnatib pm2 ga qo'shasiz.</p>
           <div class="deploy-form">
             <label class="sr" for="deployRepo">Repo manzili</label>
             <input id="deployRepo" placeholder="https://github.com/foydalanuvchi/loyiha.git">
@@ -212,7 +268,10 @@
         <section aria-labelledby="h-fm" class="fm-section">
           <div class="h-row">
             <h2 id="h-fm">Fayl menejeri</h2>
-            <span class="muted">Termux uy papkasi</span>
+            <div class="acts">
+              <button id="fmRootHome" class="primary" type="button">🏠 Termux (~)</button>
+              <button id="fmRootSd" class="ghost" type="button">📱 Telefon xotirasi</button>
+            </div>
           </div>
           <div class="fm-card">
             <div class="fm-head">
@@ -222,19 +281,50 @@
               <button id="fmUp" class="ghost">⬆ Yuqoriga</button>
               <button id="fmRefresh" class="ghost">⟳ Yangilash</button>
               <button id="fmMkdir" class="ghost">+ Papka</button>
+              <button id="fmNewFile" class="ghost">+ Fayl</button>
               <label class="fm-upload-btn">
                 ⇧ Yuklash (zip ham bo'ladi)
                 <input id="fmUpload" type="file" multiple hidden>
               </label>
+              <input id="fmSearch" class="fm-search" placeholder="Qidirish…" autocomplete="off">
+              <button id="fmDelSel" class="danger" hidden>Tanlanganlarni o'chirish</button>
               <button id="fmBuild" class="primary" hidden>▶ O'rnatish va ishga tushirish</button>
             </div>
             <ul id="fmList" class="rows fm-list"><li class="empty">Yuklanmoqda…</li></ul>
             <p id="fmStatus" class="muted fm-status">&nbsp;</p>
           </div>
+          <div id="fmEditor" class="fm-editor" hidden>
+            <div class="fm-head">
+              <strong id="fmEditName" class="fm-crumbs">fayl.txt</strong>
+              <div class="acts">
+                <button id="fmSave" class="primary">Saqlash</button>
+                <button id="fmEditClose" class="ghost">Yopish</button>
+              </div>
+            </div>
+            <textarea id="fmEditText" spellcheck="false" placeholder="Fayl matni..."></textarea>
+          </div>
         </section>
       </div>
 
-      <!-- 6. LOGLAR & JURNAL -->
+      <!-- 6. TERMINAL (ERKIN SHELL) -->
+      <div class="tab-panel" data-tab="terminal" hidden>
+        <section aria-labelledby="h-term">
+          <div class="h-row">
+            <h2 id="h-term">Termux terminali</h2>
+            <button id="termClear" class="ghost">Tozalash</button>
+          </div>
+          <p class="muted">Buyruqlar Termux foydalanuvchisi nomidan bajariladi (vaqt chegarasi 300 soniya, <code>cd</code> saqlanadi, barcha buyruqlar jurnalga yoziladi). Joriy papka: <strong id="termCwd">~</strong></p>
+          <div id="termSecWarn" class="banner" hidden>Tavsiya: Erkin terminal yoqilgani uchun serverda <code>npm run totp</code> bilan 2FA yoqib qo'ying.</div>
+          <pre id="termOut" tabindex="0">Termux buyrug'ini kiriting (masalan: ls -la, pm2 status, python3 --version)</pre>
+          <form id="termForm" class="term-form">
+            <label class="sr" for="termCmd">Buyruq</label>
+            <input id="termCmd" placeholder="$ buyruqni kiriting..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+            <button id="termRun" class="primary">Bajarish</button>
+          </form>
+        </section>
+      </div>
+
+      <!-- 7. LOGLAR & JURNAL -->
       <div class="tab-panel" data-tab="logs" hidden>
         <section aria-labelledby="h-logs">
           <h2 id="h-logs">Loglar</h2>
@@ -244,6 +334,7 @@
             <label class="sr" for="logLines">Qatorlar soni</label>
             <select id="logLines"><option>50</option><option selected>100</option><option>300</option><option>500</option></select>
             <button id="logBtn" class="primary">Logni yuklash</button>
+            <label class="log-live"><input type="checkbox" id="logLive"> Jonli (Auto)</label>
           </div>
           <pre id="logOut" tabindex="0">Log manbasini tanlab, "Logni yuklash"ni bosing.</pre>
         </section>

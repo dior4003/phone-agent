@@ -4,7 +4,13 @@ import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import org.json.JSONArray
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.os.Handler
+import android.os.Looper
 import org.json.JSONObject
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Faqat shu yerda sanalgan amallar bajariladi. Erkin shell YO'Q.
@@ -14,6 +20,15 @@ class Actions(private val ctx: Context) {
     data class Svc(val start: String, val stop: String, val procs: List<String>)
 
     companion object {
+        fun setCharging(enable: Boolean) {
+            val v = if (enable) "1" else "0"
+            val inv = if (enable) "0" else "1"
+            Root.raw(
+                "if [ -f /sys/class/power_supply/battery/charging_enabled ]; then echo $v > /sys/class/power_supply/battery/charging_enabled; " +
+                "elif [ -f /sys/class/power_supply/battery/battery_charging_enabled ]; then echo $v > /sys/class/power_supply/battery/battery_charging_enabled; " +
+                "elif [ -f /sys/class/power_supply/battery/input_suspend ]; then echo $inv > /sys/class/power_supply/battery/input_suspend; fi"
+            )
+        }
         val SERVICES = linkedMapOf(
             "mariadb" to Svc(
                 "nohup mysqld_safe >/dev/null 2>&1 &",
@@ -33,6 +48,7 @@ class Actions(private val ctx: Context) {
         // chegaraga ega — GitHub'ning "fine-grained" shaxsiy tokenlari 90+ belgi bo'lishi mumkin.
         private val REPO_URL = Regex("^https://[A-Za-z0-9@:%._+-]{1,220}(/[A-Za-z0-9._+-]{1,80}){1,6}(\\.git)?$")
         private val SCRIPT_NAME = Regex("^[A-Za-z0-9_:.-]{1,40}$")
+        private val PKG_NAME = Regex("^[a-zA-Z0-9._]{3,120}$")
         private val NET_OPS = setOf("status", "wifi_on", "wifi_off", "bt_on", "bt_off", "data_on", "data_off")
         private const val MAX_FILE_BYTES = 15 * 1024 * 1024 // server/src/app.js dagi MAX_FILE_BYTES bilan bir xil
     }
@@ -68,6 +84,12 @@ class Actions(private val ctx: Context) {
             "deploy" -> deploy(op, target, m)
             "flashlight" -> flashlight(op)
             "file" -> file(op, target, m)
+            "shell" -> shell(m.optString("cmd"), m.optString("cwd", "."))
+            "apps" -> apps(op, target)
+            "battery_limit" -> batteryLimit(op, m)
+            "screenshot" -> screenshot()
+            "clipboard" -> clipboard(op, m.optString("text"))
+            "backup" -> backup()
             else -> false to "Noma'lum amal"
         }
     }
@@ -225,33 +247,78 @@ class Actions(private val ctx: Context) {
                 true to "Yuklab olindi: $target"
             }
             "install" -> {
-                val (ok, out) = Root.runLong(
-                    user,
-                    "test -d $qTarget || { echo 'Papka topilmadi'; exit 9; }; cd $qTarget && npm install --no-audit --no-fund 2>&1",
-                    900
-                )
+                val installCmd = "test -d $qTarget || { echo 'Papka topilmadi'; exit 9; }; cd $qTarget && { " +
+                    "if [ -f package.json ]; then npm install --no-audit --no-fund 2>&1; " +
+                    "elif [ -f requirements.txt ]; then " +
+                    "(python3 -m venv .venv 2>/dev/null || true); " +
+                    "if [ -x .venv/bin/pip ]; then .venv/bin/pip install -r requirements.txt 2>&1; " +
+                    "else pip install -r requirements.txt 2>&1; fi; " +
+                    "elif [ -f composer.json ]; then composer install --no-interaction 2>&1; " +
+                    "else echo 'Bog\\'liqlik fayli topilmadi, davom etilmoqda'; fi; }"
+                val (ok, out) = Root.runLong(user, installCmd, 900)
                 if (!ok) false to out.takeLast(2000) else true to "O'rnatildi: $target"
             }
             "scripts" -> {
-                val (ok, out) = Root.run(user, "cat $qTarget/package.json 2>/dev/null")
-                if (!ok || out.isBlank()) return false to "package.json topilmadi (avval \"npm install\" bosilganmi?)"
-                try {
-                    val scripts = JSONObject(out).optJSONObject("scripts") ?: JSONObject()
-                    true to scripts.toString()
-                } catch (e: Exception) {
-                    false to "package.json o'qib bo'lmadi"
+                val (okPkg, outPkg) = Root.run(user, "cat $qTarget/package.json 2>/dev/null")
+                if (okPkg && outPkg.isNotBlank()) {
+                    return try {
+                        val scripts = JSONObject(outPkg).optJSONObject("scripts") ?: JSONObject()
+                        true to scripts.toString()
+                    } catch (e: Exception) {
+                        false to "package.json o'qib bo'lmadi"
+                    }
                 }
+                val (_, detected) = Root.run(
+                    user,
+                    "cd $qTarget 2>/dev/null || exit 0; " +
+                        "for f in main.py app.py bot.py run.py server.py manage.py; do [ -f \"\$f\" ] && echo \"py:\$f\"; done; " +
+                        "[ -f artisan ] && echo 'php:artisan'; " +
+                        "{ [ -f index.php ] || [ -f public/index.php ]; } && echo 'php:server'"
+                )
+                val scripts = JSONObject()
+                for (line in detected.lines().map { it.trim() }.filter { it.isNotEmpty() }) {
+                    when {
+                        line == "py:manage.py" -> scripts.put("python:manage.py", "python3 manage.py runserver 0.0.0.0:8000")
+                        line.startsWith("py:") -> {
+                            val f = line.removePrefix("py:")
+                            scripts.put("python:$f", "python3 $f")
+                        }
+                        line == "php:artisan" -> scripts.put("php:artisan", "php artisan serve --host=0.0.0.0 --port=8000")
+                        line == "php:server" -> scripts.put("php:server", "php -S 0.0.0.0:8000")
+                    }
+                }
+                true to scripts.toString()
             }
             "run" -> {
                 val script = m.optString("script")
                 if (!SCRIPT_NAME.matches(script)) return false to "Noto'g'ri skript nomi"
-                // Himoya: faqat package.json ichida haqiqatan mavjud skriptni ishga tushiramiz
-                val (okCat, out) = Root.run(user, "cat $qTarget/package.json 2>/dev/null")
-                val exists = okCat && try { JSONObject(out).optJSONObject("scripts")?.has(script) == true } catch (e: Exception) { false }
-                if (!exists) return false to "Bu skript package.json \"scripts\" ichida topilmadi"
                 val qScript = shQuote(script)
+                val startCmd = when {
+                    script.startsWith("python:") -> {
+                        val pyFile = script.removePrefix("python:")
+                        val qPy = shQuote(pyFile)
+                        val (_, ex) = Root.run(user, "test -f $qTarget/$qPy && echo __OK__")
+                        if (!ex.contains("__OK__")) return false to "$pyFile topilmadi"
+                        val args = if (pyFile == "manage.py") "$qPy runserver 0.0.0.0:8000" else qPy
+                        "PY=\$(command -v python3); [ -x .venv/bin/python ] && PY=.venv/bin/python; " +
+                            "pm2 start \"\$PY\" --name $qTarget -- $args 2>&1"
+                    }
+                    script == "php:artisan" -> {
+                        "pm2 start \"\$(command -v php)\" --name $qTarget -- artisan serve --host=0.0.0.0 --port=8000 2>&1"
+                    }
+                    script == "php:server" -> {
+                        val docRoot = if (Root.run(user, "test -d $qTarget/public && echo 1").second.contains("1")) " -t public" else ""
+                        "pm2 start \"\$(command -v php)\" --name $qTarget -- -S 0.0.0.0:8000$docRoot 2>&1"
+                    }
+                    else -> {
+                        val (okCat, out) = Root.run(user, "cat $qTarget/package.json 2>/dev/null")
+                        val exists = okCat && try { JSONObject(out).optJSONObject("scripts")?.has(script) == true } catch (e: Exception) { false }
+                        if (!exists) return false to "Bu skript package.json \"scripts\" ichida topilmadi"
+                        "pm2 start \"\$(command -v node)\" --name $qTarget -- \"\$_NPM\" run $qScript 2>&1"
+                    }
+                }
                 val cmd = "command -v pm2 >/dev/null 2>&1 || { echo 'Termuxda pm2 ornatilmagan (npm install -g pm2)'; exit 127; }; " +
-                    "(cd $qTarget && (pm2 delete $qTarget >/dev/null 2>&1 || true) && pm2 start \"\$(command -v node)\" --name $qTarget -- \"\$_NPM\" run $qScript 2>&1) && (pm2 save --force >/dev/null 2>&1 || true)"
+                    "(cd $qTarget && (pm2 delete $qTarget >/dev/null 2>&1 || true) && $startCmd) && (pm2 save --force >/dev/null 2>&1 || true)"
                 val (okRun, runOut) = Root.run(user, cmd)
                 if (!okRun) false to runOut.takeLast(1500) else true to "Ishga tushirildi: $target ($script)"
             }
@@ -333,12 +400,21 @@ class Actions(private val ctx: Context) {
      * Fayl menejeri: faqat Termux foydalanuvchisi uy papkasi ichida (tizim fayllariga yo'l yopiq).
      * list/read/write/mkdir/delete/unzip — erkin shell buyrug'i yo'q.
      */
+    private fun fRun(isSd: Boolean, cmd: String): Pair<Boolean, String> =
+        if (isSd) Root.runAsRoot("cd /sdcard && { $cmd ; }") else Root.run(user, cmd)
+
+    private fun fRunLong(isSd: Boolean, cmd: String, timeoutSec: Long, maxOutChars: Int = 200_000): Pair<Boolean, String> =
+        if (isSd) Root.runRootLong("cd /sdcard && { $cmd ; }", timeoutSec, maxOutChars) else Root.runLong(user, cmd, timeoutSec, maxOutChars)
+
+    private fun fWriteStdin(isSd: Boolean, cmd: String, data: ByteArray, timeoutSec: Long): Pair<Boolean, String> =
+        if (isSd) Root.writeRootStdin("cd /sdcard && { $cmd ; }", data, timeoutSec) else Root.writeStdin(user, cmd, data, timeoutSec)
+
     private fun file(op: String, targetRaw: String, m: JSONObject): Pair<Boolean, String> {
         val rel = safeRel(targetRaw) ?: return false to "Noto'g'ri yo'l"
+        val isSd = m.optString("root") == "sdcard"
         val qRel = shQuote(rel)
         return when (op) {
             "list" -> {
-                // POSIX/mksh mos: read -d '' ishlatilmaydi (Android /system/bin/sh da read -d yo'q)
                 val cmd = "if [ ! -d $qRel ]; then echo __NODIR__; exit 4; fi; " +
                     "cd $qRel || exit 4; " +
                     "for f in * .[!.]* ..?*; do " +
@@ -348,7 +424,7 @@ class Actions(private val ctx: Context) {
                     "mt=\$(stat -c %Y \"\$f\" 2>/dev/null || echo 0); " +
                     "printf '%s\\t%s\\t%s\\t%s\\n' \"\$t\" \"\$sz\" \"\$mt\" \"\$f\"; " +
                     "done"
-                val (ok, out) = Root.run(user, cmd)
+                val (ok, out) = fRun(isSd, cmd)
                 if (out.trim() == "__NODIR__") return false to "Papka topilmadi"
                 if (!ok) return false to out.take(1500)
                 val arr = JSONArray()
@@ -368,13 +444,12 @@ class Actions(private val ctx: Context) {
             }
             "read" -> {
                 if (rel == ".") return false to "Fayl tanlanmagan"
-                val (_, sz) = Root.run(user, "stat -c %s $qRel 2>/dev/null || wc -c < $qRel 2>/dev/null || echo -1")
+                val (_, sz) = fRun(isSd, "stat -c %s $qRel 2>/dev/null || wc -c < $qRel 2>/dev/null || echo -1")
                 val size = sz.trim().toLongOrNull() ?: -1
                 if (size < 0) return false to "Fayl topilmadi"
                 if (size > MAX_FILE_BYTES) return false to "Fayl juda katta (limit ${MAX_FILE_BYTES / 1024 / 1024} MB)"
-                // base64 ~4/3 marta kattalashtiradi; natija shuncha uzun bo'lishi mumkinligini hisobga olamiz
                 val maxOut = (MAX_FILE_BYTES.toLong() * 4 / 3 + 4096).toInt()
-                val (ok, out) = Root.runLong(user, "base64 -w0 $qRel 2>/dev/null || base64 $qRel 2>/dev/null | tr -d '\\n'", 120, maxOut)
+                val (ok, out) = fRunLong(isSd, "base64 -w0 $qRel 2>/dev/null || base64 $qRel 2>/dev/null | tr -d '\\n'", 120, maxOut)
                 if (!ok || out.isBlank()) return false to "O'qib bo'lmadi"
                 true to out.trim()
             }
@@ -389,12 +464,28 @@ class Actions(private val ctx: Context) {
                 }
                 if (bytes.size > MAX_FILE_BYTES) return false to "Fayl juda katta (limit ${MAX_FILE_BYTES / 1024 / 1024} MB)"
                 val cmd = "mkdir -p -- \"\$(dirname $qRel)\" 2>/dev/null; cat > $qRel && echo __OK__ || echo __FAIL__"
-                val (ok, out) = Root.writeStdin(user, cmd, bytes, 120)
+                val (ok, out) = fWriteStdin(isSd, cmd, bytes, 120)
                 if (!ok || !out.contains("__OK__")) return false to "Yozib bo'lmadi: ${out.take(500)}"
                 true to "Saqlandi: $rel"
             }
-            "mkdir" -> if (rel == ".") false to "Papka nomi kerak" else Root.run(user, "mkdir -p -- $qRel")
-            "delete" -> if (rel == ".") false to "Bu papkani o'chirib bo'lmaydi" else Root.run(user, "rm -rf -- $qRel")
+            "mkdir" -> if (rel == ".") false to "Papka nomi kerak" else fRun(isSd, "mkdir -p -- $qRel")
+            "rename" -> {
+                if (rel == ".") return false to "Bu papka nomini o'zgartirib bo'lmaydi"
+                val dest = safeRel(m.optString("dest")) ?: return false to "Noto'g'ri yangi nom"
+                if (dest == ".") return false to "Yangi nom kiriting"
+                val qDest = shQuote(dest)
+                val (okMv, outMv) = fRun(isSd, "mkdir -p -- \"\$(dirname $qDest)\" 2>/dev/null; mv -n -- $qRel $qDest 2>&1")
+                if (!okMv) false to outMv.ifBlank { "Nomini o'zgartirib bo'lmadi" } else true to "O'zgartirildi: $dest"
+            }
+            "copy" -> {
+                if (rel == ".") return false to "Fayl tanlanmagan"
+                val dest = safeRel(m.optString("dest")) ?: return false to "Noto'g'ri manzil"
+                if (dest == ".") return false to "Yangi nom kiriting"
+                val qDest = shQuote(dest)
+                val (okCp, outCp) = fRun(isSd, "mkdir -p -- \"\$(dirname $qDest)\" 2>/dev/null; cp -r -- $qRel $qDest 2>&1")
+                if (!okCp) false to outCp.ifBlank { "Nusxalab bo'lmadi" } else true to "Nusxalandi: $dest"
+            }
+            "delete" -> if (rel == ".") false to "Bu papkani o'chirib bo'lmaydi" else fRun(isSd, "rm -rf -- $qRel")
             "unzip" -> {
                 if (rel == ".") return false to "Zip fayl tanlanmagan"
                 val dest = safeRel(m.optString("dest")) ?: return false to "Noto'g'ri manzil papka"
@@ -402,7 +493,7 @@ class Actions(private val ctx: Context) {
                 val cmd = "command -v unzip >/dev/null 2>&1 || { echo __NOUNZIP__; exit 127; }; " +
                     "test -f $qRel || { echo __NOFILE__; exit 4; }; " +
                     "mkdir -p -- $qDest && unzip -o -q $qRel -d $qDest 2>&1 && echo __OK__ || echo __FAIL__"
-                val (ok, out) = Root.runLong(user, cmd, 300)
+                val (ok, out) = fRunLong(isSd, cmd, 300)
                 if (out.contains("__NOUNZIP__")) return false to "Termux'da unzip o'rnatilmagan. Bajaring: pkg install unzip"
                 if (out.contains("__NOFILE__")) return false to "Zip fayl topilmadi"
                 if (!ok || !out.contains("__OK__")) return false to out.take(1500)
@@ -410,5 +501,139 @@ class Actions(private val ctx: Context) {
             }
             else -> false to "Noto'g'ri amal"
         }
+    }
+
+    private fun shell(cmdRaw: String, cwdRaw: String): Pair<Boolean, String> {
+        val cmd = cmdRaw.trim()
+        if (cmd.isEmpty()) return false to "Buyruq bo'sh"
+        if (cmd.length > 2000) return false to "Buyruq juda uzun (maksimum 2000 belgi)"
+        val cwd = safeRel(cwdRaw) ?: "."
+        val qCwd = shQuote(cwd)
+        val wrapped = "cd $qCwd 2>/dev/null || cd \"\$HOME\"; { $cmd ; } 2>&1; __rc=\$?; printf '\n__CWD__:%s\n' \"\$(pwd)\"; exit \$__rc"
+        val (ok, rawOut) = Root.runLong(user, wrapped, 300)
+        val lines = rawOut.lines()
+        val cwdLine = lines.lastOrNull { it.startsWith("__CWD__:") }
+        val newCwdAbs = cwdLine?.removePrefix("__CWD__:")?.trim() ?: ""
+        val homePrefix = "/data/data/com.termux/files/home"
+        val newCwd = when {
+            newCwdAbs == homePrefix -> "."
+            newCwdAbs.startsWith("$homePrefix/") -> newCwdAbs.removePrefix("$homePrefix/")
+            else -> cwd
+        }
+        val cleanOut = lines.filterNot { it.startsWith("__CWD__:") }.joinToString("\n").trimEnd().takeLast(30_000)
+        val payload = JSONObject().put("out", cleanOut).put("cwd", newCwd).toString()
+        return ok to payload
+    }
+
+
+    private fun runningThirdPartyApps(): List<Triple<String, Int, Long>> {
+        val pkgsOut = Root.raw("pm list packages -3 2>/dev/null")
+        val thirdParty = pkgsOut.lines()
+            .map { it.trim().removePrefix("package:") }
+            .filter { it.isNotEmpty() && !it.startsWith("com.termux") && it != ctx.packageName }
+            .toSet()
+        if (thirdParty.isEmpty()) return emptyList()
+        val psOut = Root.raw("ps -A -o PID,RSS,NAME 2>/dev/null")
+        val map = linkedMapOf<String, Pair<Int, Long>>()
+        for (line in psOut.lines().drop(1)) {
+            val parts = line.trim().split(Regex("\\s+"))
+            if (parts.size < 3) continue
+            val pid = parts[0].toIntOrNull() ?: continue
+            val rssKb = parts[1].toLongOrNull() ?: 0L
+            val name = parts[2].substringBefore(":")
+            if (name in thirdParty) {
+                val prev = map[name]
+                if (prev == null) map[name] = pid to rssKb
+                else map[name] = prev.first to (prev.second + rssKb)
+            }
+        }
+        return map.entries
+            .map { Triple(it.key, it.value.first, it.value.second / 1024L) }
+            .sortedByDescending { it.third }
+    }
+
+    private fun apps(op: String, target: String): Pair<Boolean, String> {
+        return when (op) {
+            "list" -> {
+                val arr = JSONArray()
+                for ((pkg, pid, memMb) in runningThirdPartyApps()) {
+                    arr.put(JSONObject().put("pkg", pkg).put("pid", pid).put("memMb", memMb))
+                }
+                true to arr.toString()
+            }
+            "stop" -> {
+                if (!PKG_NAME.matches(target)) return false to "Noto'g'ri paket nomi"
+                if (target.startsWith("com.termux") || target == ctx.packageName) {
+                    return false to "Termux va Phone Agent'ni to'xtatib bo'lmaydi"
+                }
+                Root.raw("am force-stop $target")
+                true to "To'xtatildi: $target"
+            }
+            "optimize" -> {
+                val running = runningThirdPartyApps()
+                for ((pkg, _, _) in running) {
+                    Root.raw("am force-stop $pkg")
+                }
+                Root.raw("am kill-all; sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true")
+                true to "Optimizatsiya qilindi: ${running.size} ta fon ilova to'xtatildi va RAM kesh tozalandi"
+            }
+            else -> false to "Noto'g'ri amal"
+        }
+    }
+
+
+    private fun batteryLimit(op: String, m: JSONObject): Pair<Boolean, String> {
+        if (op == "set") {
+            prefs.chargeLimitEnabled = m.optBoolean("enabled", false)
+            if (m.has("min")) prefs.chargeMin = m.optInt("min", 50)
+            if (m.has("max")) prefs.chargeMax = m.optInt("max", 80)
+            if (!prefs.chargeLimitEnabled) setCharging(true)
+        }
+        return true to JSONObject()
+            .put("enabled", prefs.chargeLimitEnabled)
+            .put("min", prefs.chargeMin)
+            .put("max", prefs.chargeMax)
+            .toString()
+    }
+
+    private fun screenshot(): Pair<Boolean, String> {
+        val (ok, out) = Root.runRootLong(
+            "screencap -p | base64 -w0 2>/dev/null || screencap -p | base64 | tr -d '\n'",
+            20,
+            8_000_000
+        )
+        val b64 = out.trim()
+        return if (!ok || b64.isEmpty()) false to "Ekran rasmini olib bo'lmadi" else true to b64
+    }
+
+    private fun clipboard(op: String, text: String): Pair<Boolean, String> {
+        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val latch = CountDownLatch(1)
+        var resText = ""
+        Handler(Looper.getMainLooper()).post {
+            try {
+                if (op == "set") {
+                    cm.setPrimaryClip(ClipData.newPlainText("phone-agent", text))
+                    resText = "Buferga yozildi"
+                } else {
+                    val clip = cm.primaryClip
+                    resText = if (clip != null && clip.itemCount > 0) (clip.getItemAt(0).coerceToText(ctx)?.toString() ?: "") else ""
+                }
+            } finally {
+                latch.countDown()
+            }
+        }
+        latch.await(3, TimeUnit.SECONDS)
+        return true to JSONObject().put("text", resText).toString()
+    }
+
+    private fun backup(): Pair<Boolean, String> {
+        val cmd = "TS=\$(date +%Y%m%d-%H%M); OUT=\"backup-\$TS.tar.gz\"; " +
+            "tar --exclude='node_modules' --exclude='.git' --exclude='.pm2' --exclude='.npm' --exclude='.cache' --exclude='backup-*.tar.gz' -czf \"\$OUT\" . 2>&1 && echo \"__FILE__:\$OUT\""
+        val (ok, out) = Root.runLong(user, cmd, 300)
+        val fileLine = out.lines().lastOrNull { it.startsWith("__FILE__:") }
+        if (!ok || fileLine == null) return false to out.takeLast(1500).ifBlank { "Zaxira yaratib bo'lmadi" }
+        val fname = fileLine.removePrefix("__FILE__:").trim()
+        return true to "Zaxira yaratildi (Fayllar bo'limida): $fname"
     }
 }

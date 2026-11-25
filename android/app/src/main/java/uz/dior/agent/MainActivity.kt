@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusPill: TextView
     private lateinit var rootBadge: TextView
     private lateinit var msgView: TextView
+    private lateinit var notifBtnView: Button
 
     private val cBg = Color.parseColor("#0E1522")
     private val cCard = Color.parseColor("#151E2F")
@@ -288,11 +289,21 @@ class MainActivity : AppCompatActivity() {
                 addView(laravel)
             })
 
+            notifBtnView = styledBtn("Bildirishnomalarni Telegramga ulash (Ruxsat)", Color.TRANSPARENT, cAccent, cLine).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(12) }
+                setOnClickListener {
+                    startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                }
+            }
             addView(card("Telegram ogohlantirishlari (ixtiyoriy)") {
                 addView(label("Telegram bot tokeni"))
                 addView(tgToken)
                 addView(label("Telegram chat ID"))
                 addView(tgChatId)
+                addView(notifBtnView)
             })
 
             addView(saveBtn)
@@ -321,6 +332,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        val enabled = Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: ""
+        if (enabled.contains(packageName)) {
+            notifBtnView.text = "✓ Bildirishnomalar Telegramga ulangan"
+            notifBtnView.setTextColor(cOk)
+        } else {
+            notifBtnView.text = "Bildirishnomalarni Telegramga ulash (Ruxsat)"
+            notifBtnView.setTextColor(cAccent)
+        }
         handler.post(tick)
     }
 
