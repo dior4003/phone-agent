@@ -388,6 +388,7 @@ const AUDIT_TEXT = {
   agent_rejected: () => "Agent noto'g'ri token bilan urindi",
   cmd: (e) => ["Buyruq:", e.action, e.target, e.op].filter(Boolean).join(" "),
   result: (e) => `Natija: ${e.ok ? "muvaffaqiyatli" : "xato"} (${[e.action, e.target].filter(Boolean).join(" ")})`,
+  notif: (e) => `🔔 Bildirishnoma: ${[e.target, e.op].filter(Boolean).join(" — ")}`,
 };
 
 async function loadAudit() {
@@ -414,6 +415,11 @@ function connect() {
       const was = S.agent;
       setAgent(m.online);
       if (m.online && !was) { setTimeout(loadPm2, 800); setTimeout(loadNetwork, 800); setTimeout(loadBrightness, 800); }
+    } else if (m.type === "audio_up") {
+      playPcmChunk(m.data);
+    } else if (m.type === "audio_err") {
+      toast(m.error || "Audio xatosi", true);
+      stopPttListen();
     } else if (m.type === "stats") {
       pushHist({ ram: m.data.ramTotalMb > 0 ? (1 - m.data.ramAvailMb / m.data.ramTotalMb) * 100 : null, load: m.data.load, temp: m.data.tempC });
       if (!S.agent) setAgent(true);
@@ -610,6 +616,121 @@ $("#appsOptimize").addEventListener("click", async () => {
   btn.textContent = "⚡ Optimizatsiya";
   if (r.ok && r.data.ok) { toast(r.data.out || "Optimizatsiya bajarildi"); loadBgApps(); setTimeout(refreshStatus, 1000); }
   else toast(r.data.error || r.data.out || "Xato", true);
+});
+
+
+// ---------- Ratsiya (Jonli ovozli aloqa) ----------
+let audioCtx = null;
+let nextPlayTime = 0;
+let micStream = null;
+let micProc = null;
+let pttListening = false;
+
+function ensureAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+
+function playPcmChunk(b64) {
+  if (!b64 || !pttListening) return;
+  try {
+    const ctx = ensureAudioCtx();
+    const bin = atob(b64);
+    const len = bin.length >> 1;
+    if (!len) return;
+    const buf = ctx.createBuffer(1, len, 16000);
+    const ch = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      let v = bin.charCodeAt(i * 2) | (bin.charCodeAt(i * 2 + 1) << 8);
+      if (v >= 0x8000) v -= 0x10000;
+      ch[i] = v / 32768;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    const now = ctx.currentTime;
+    if (nextPlayTime < now) nextPlayTime = now + 0.04;
+    src.start(nextPlayTime);
+    nextPlayTime += buf.duration;
+  } catch {}
+}
+
+function downsampleTo16k(input, inRate) {
+  if (inRate === 16000) return input;
+  const ratio = inRate / 16000;
+  const outLen = Math.floor(input.length / ratio);
+  const out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) out[i] = input[Math.floor(i * ratio)];
+  return out;
+}
+
+async function startPttTalk() {
+  if (!S.agent || !S.ws || S.ws.readyState !== 1) return;
+  const btn = $("#pttTalk");
+  btn.classList.add("talking");
+  $("#pttStatus").textContent = "Gapiring… (efirda)";
+  try {
+    const ctx = ensureAudioCtx();
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    const src = ctx.createMediaStreamSource(micStream);
+    micProc = ctx.createScriptProcessor(1024, 1, 1);
+    micProc.onaudioprocess = (e) => {
+      if (!btn.classList.contains("talking") || !S.ws || S.ws.readyState !== 1) return;
+      const f32 = downsampleTo16k(e.inputBuffer.getChannelData(0), ctx.sampleRate);
+      const bytes = new Uint8Array(f32.length * 2);
+      for (let i = 0; i < f32.length; i++) {
+        const s = Math.max(-1, Math.min(1, f32[i]));
+        const v = s < 0 ? s * 0x8000 : s * 0x7fff;
+        bytes[i * 2] = v & 0xff;
+        bytes[i * 2 + 1] = (v >> 8) & 0xff;
+      }
+      let bin = "";
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      S.ws.send(JSON.stringify({ type: "audio_down", data: btoa(bin) }));
+    };
+    src.connect(micProc);
+    micProc.connect(ctx.destination);
+  } catch {
+    stopPttTalk();
+    toast("Brauzerda mikrofon ruxsati berilmadi", true);
+  }
+}
+
+function stopPttTalk() {
+  $("#pttTalk").classList.remove("talking");
+  if (!pttListening) $("#pttStatus").textContent = " ";
+  if (micProc) { try { micProc.disconnect(); } catch {} micProc = null; }
+  if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
+}
+
+const pttBtn = $("#pttTalk");
+pttBtn.addEventListener("pointerdown", (e) => { e.preventDefault(); startPttTalk(); });
+pttBtn.addEventListener("pointerup", stopPttTalk);
+pttBtn.addEventListener("pointercancel", stopPttTalk);
+pttBtn.addEventListener("pointerleave", stopPttTalk);
+
+function stopPttListen() {
+  pttListening = false;
+  $("#pttListen").textContent = "🔊 Telefonni eshitish";
+  $("#pttListen").className = "ghost";
+  $("#pttStatus").textContent = " ";
+  if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify({ type: "ptt_cmd", op: "listen_off" }));
+}
+
+$("#pttListen").addEventListener("click", () => {
+  if (!S.agent || !S.ws || S.ws.readyState !== 1) return;
+  if (pttListening) {
+    stopPttListen();
+  } else {
+    ensureAudioCtx();
+    nextPlayTime = 0;
+    pttListening = true;
+    $("#pttListen").textContent = "⏹ Eshitishni to'xtatish";
+    $("#pttListen").className = "danger";
+    $("#pttStatus").textContent = "Telefon mikrofoni eshitilmoqda…";
+    S.ws.send(JSON.stringify({ type: "ptt_cmd", op: "listen_on" }));
+  }
 });
 
 // ---------- Telefonni topish ----------

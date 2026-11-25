@@ -254,7 +254,7 @@ class Actions(private val ctx: Context) {
                     "if [ -x .venv/bin/pip ]; then .venv/bin/pip install -r requirements.txt 2>&1; " +
                     "else pip install -r requirements.txt 2>&1; fi; " +
                     "elif [ -f composer.json ]; then composer install --no-interaction 2>&1; " +
-                    "else echo 'Bog\\'liqlik fayli topilmadi, davom etilmoqda'; fi; }"
+                    "else echo 'Bogliqlik fayli topilmadi, davom etilmoqda'; fi; }"
                 val (ok, out) = Root.runLong(user, installCmd, 900)
                 if (!ok) false to out.takeLast(2000) else true to "O'rnatildi: $target"
             }
@@ -598,12 +598,18 @@ class Actions(private val ctx: Context) {
 
     private fun screenshot(): Pair<Boolean, String> {
         val (ok, out) = Root.runRootLong(
-            "screencap -p | base64 -w0 2>/dev/null || screencap -p | base64 | tr -d '\n'",
+            "TMP=/data/local/tmp/_pa_shot.png; rm -f \$TMP; " +
+                "/system/bin/screencap -p \$TMP 2>/dev/null && base64 \$TMP 2>/dev/null; " +
+                "rm -f \$TMP",
             20,
-            8_000_000
+            12_000_000
         )
-        val b64 = out.trim()
-        return if (!ok || b64.isEmpty()) false to "Ekran rasmini olib bo'lmadi" else true to b64
+        val b64 = out.replace("\n", "").replace("\r", "").trim()
+        return if (!ok || !b64.startsWith("iVBOR")) {
+            false to "Ekran rasmini olib bo'lmadi: ${out.take(300)}"
+        } else {
+            true to b64
+        }
     }
 
     private fun clipboard(op: String, text: String): Pair<Boolean, String> {

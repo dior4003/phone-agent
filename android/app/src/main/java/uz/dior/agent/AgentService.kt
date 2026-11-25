@@ -49,10 +49,12 @@ class AgentService : Service() {
     @Volatile private var stopped = false
     private var retryMs = 3000L
     private lateinit var actions: Actions
+    private lateinit var walkie: AudioWalkie
 
     override fun onCreate() {
         super.onCreate()
         actions = Actions(this)
+        walkie = AudioWalkie(this)
         getSystemService(NotificationManager::class.java)
             .createNotificationChannel(NotificationChannel("agent", "Agent", NotificationManager.IMPORTANCE_LOW))
     }
@@ -94,6 +96,7 @@ class AgentService : Service() {
                 retryMs = 3000L
                 state = "Ulangan"
                 statsTask?.cancel(false)
+        walkie.stopMic()
                 statsTask = worker.scheduleWithFixedDelay({
                     try {
                         val st = Stats.collect(this@AgentService)
@@ -110,7 +113,27 @@ class AgentService : Service() {
             }
 
             override fun onMessage(w: WebSocket, text: String) {
-                cmdPool.execute { respond(w, text) }
+                val m = try { JSONObject(text) } catch (_: Exception) { return }
+                when (m.optString("type")) {
+                    "audio_down" -> walkie.playChunk(m.optString("data"))
+                    "ptt_cmd" -> {
+                        if (m.optString("op") == "listen_on") {
+                            val ok = walkie.startMic { b64 ->
+                                try {
+                                    w.send(JSONObject().put("type", "audio_up").put("data", b64).toString())
+                                } catch (_: Exception) {}
+                            }
+                            if (!ok) {
+                                try {
+                                    w.send(JSONObject().put("type", "audio_err").put("error", "Telefonda mikrofon ruxsati berilmagan").toString())
+                                } catch (_: Exception) {}
+                            }
+                        } else if (m.optString("op") == "listen_off") {
+                            walkie.stopMic()
+                        }
+                    }
+                    else -> cmdPool.execute { respond(w, text) }
+                }
             }
 
             override fun onClosed(w: WebSocket, code: Int, reason: String) {
@@ -156,6 +179,7 @@ class AgentService : Service() {
         stopped = true
         state = "O'chiq"
         statsTask?.cancel(true)
+        walkie.release()
         activeWs = null
         ws?.close(1000, "stop")
         worker.shutdownNow()

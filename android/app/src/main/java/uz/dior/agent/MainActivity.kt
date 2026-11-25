@@ -315,9 +315,9 @@ class MainActivity : AppCompatActivity() {
             addView(rootLayout)
         })
 
-        if (Build.VERSION.SDK_INT >= 33) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-        }
+        val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= 33) perms.add(Manifest.permission.POST_NOTIFICATIONS)
+        requestPermissions(perms.toTypedArray(), 1)
         Shell.getShell { shell ->
             if (shell.isRoot) {
                 rootBadge.text = "Root: ulangan"

@@ -22,6 +22,7 @@ export class Alerts {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_id: this.chatId, text }),
       });
+      if (!r.ok) this.log("Telegram javobi:", r.status, await r.text().catch(() => ""));
       return r.ok;
     } catch (e) {
       this.log("Telegram xatosi:", e.message);

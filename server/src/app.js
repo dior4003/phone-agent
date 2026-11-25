@@ -599,7 +599,7 @@ export function createApp(env) {
   // ---------- WebSocket ----------
   // 24 MB: fayl menejeridagi "o'qish/yuklab olish" natijasi (base64, ~15 MB fayl uchun) shu orqali keladi.
   const agentWss = new WebSocketServer({ noServer: true, maxPayload: 24 * 1024 * 1024 });
-  const panelWss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
+  const panelWss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 });
 
   server.on("upgrade", (req, socket, head) => {
     const pathname = (req.url || "").split("?")[0];
@@ -651,6 +651,7 @@ export function createApp(env) {
         if (alerts.enabled) for (const a of evaluate(lastStats, prev, cfg.thresholds)) alerts.send(a.key, a.text);
       } else if (m.type === "notif" && m.data && typeof m.data === "object") {
         const { app = "", title = "", text = "", time = "" } = m.data;
+        audit({ ev: "notif", target: app, op: title });
         broadcast({ type: "notif", data: m.data });
         if (alerts.enabled) {
           const lines = [
@@ -661,6 +662,8 @@ export function createApp(env) {
           ].filter(Boolean);
           alerts.send(`notif:${crypto.randomUUID()}`, lines.join("\n"), { force: true });
         }
+      } else if (m.type === "audio_up" || m.type === "audio_err") {
+        broadcast(m);
       } else if (m.type === "result" && typeof m.id === "string") {
         const p = pending.get(m.id);
         if (!p) return;
@@ -698,9 +701,12 @@ export function createApp(env) {
     ws.isAlive = true;
     ws.on("pong", () => { ws.isAlive = true; });
     ws.on("message", (raw) => {
-      if (authed) return;
       let m;
-      try { m = JSON.parse(raw); } catch { return ws.close(4001, "auth"); }
+      try { m = JSON.parse(raw); } catch { return !authed && ws.close(4001, "auth"); }
+      if (authed) {
+        if ((m.type === "audio_down" || m.type === "ptt_cmd") && agent) sendWs(agent, m);
+        return;
+      }
       if (!verifyJwt(m.token, cfg.jwtSecret)) return ws.close(4001, "auth");
       authed = true;
       clearTimeout(timer);
